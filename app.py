@@ -58,8 +58,8 @@ def get_group_for(name, groups):
     return "未割当"
 
 
-tab_rate, tab_results, tab_shift, tab_groups = st.tabs([
-    "📈 受電率", "📊 コール処理実績", "🕐 稼働実績", "⚙️ グループ設定"
+tab_rate, tab_results, tab_shift, tab_improve, tab_groups = st.tabs([
+    "📈 受電率", "📊 コール処理実績", "🕐 稼働実績", "🎯 改善分析", "⚙️ グループ設定"
 ])
 
 
@@ -368,7 +368,128 @@ with tab_shift:
         st.dataframe(ds, use_container_width=True, hide_index=True)
 
 
-# ----- タブ4: グループ設定 -----
+# ----- タブ4: 改善分析 -----
+with tab_improve:
+    st.subheader("🎯 受電率 改善分析")
+    st.caption("入電数・受電率・稼働状況を突き合わせて、どこにスタッフを配置すべきかを分析します。")
+
+    if hourly_df.empty or shift_df.empty or daily_df.empty:
+        st.warning("データが不足しています（受電率・稼働実績の両方が必要です）")
+    else:
+        # --- 1. 時間帯別: 平均入電数 vs 平均受電率 ---
+        st.subheader("時間帯別 入電負荷 × 受電率")
+        st.caption("受電率が低く入電数が多い時間帯 = スタッフ増員の優先度が高い")
+
+        hour_labels = [f"{h}時" for h in range(10, 19)]
+        filt = hourly_df[hourly_df["時間帯"].isin(hour_labels)]
+        if not filt.empty:
+            h_stats = filt.groupby("時間帯").agg(
+                平均入電数=("入電数", "mean"),
+                平均受電率=("受電率", "mean"),
+                合計入電数=("入電数", "sum"),
+                合計受電対応数=("受電対応数", "sum"),
+            ).round(1).reindex(hour_labels).dropna().reset_index()
+            h_stats["取りこぼし"] = h_stats["合計入電数"] - h_stats["合計受電対応数"]
+
+            fig = go.Figure()
+            # 平均入電数（棒グラフ）
+            fig.add_trace(go.Bar(
+                x=h_stats["時間帯"], y=h_stats["平均入電数"],
+                name="平均入電数", marker_color="#BBDEFB", opacity=0.7,
+                yaxis="y2",
+            ))
+            # 取りこぼし数（棒グラフ）
+            fig.add_trace(go.Bar(
+                x=h_stats["時間帯"], y=h_stats["取りこぼし"],
+                name="取りこぼし（月合計）", marker_color="#EF9A9A", opacity=0.7,
+                yaxis="y3",
+            ))
+            # 受電率（折れ線）
+            fig.add_trace(go.Scatter(
+                x=h_stats["時間帯"], y=h_stats["平均受電率"],
+                name="平均受電率(%)", mode="lines+markers+text",
+                line=dict(color="#1565C0", width=3),
+                text=[f"{v:.1f}%" for v in h_stats["平均受電率"]],
+                textposition="top center",
+                yaxis="y1",
+            ))
+            fig.update_layout(
+                title="時間帯別 平均入電数 × 受電率 × 取りこぼし",
+                yaxis=dict(title="受電率（%）", side="left", range=[0, 100]),
+                yaxis2=dict(title="平均入電数", overlaying="y", side="right"),
+                yaxis3=dict(overlaying="y", side="right", showticklabels=False),
+                legend=dict(x=0, y=1.15, orientation="h"),
+                barmode="group",
+                height=500,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 優先度テーブル
+            priority = h_stats[["時間帯", "平均入電数", "平均受電率", "取りこぼし"]].copy()
+            priority["優先度"] = priority.apply(
+                lambda r: "🔴 高" if r["平均受電率"] < 80 and r["平均入電数"] > priority["平均入電数"].median()
+                else ("🟡 中" if r["平均受電率"] < 90 else "🟢 低"), axis=1
+            )
+            priority["平均受電率"] = priority["平均受電率"].apply(lambda x: f"{x:.1f}%")
+            st.dataframe(priority, use_container_width=True, hide_index=True)
+
+        # --- 2. 日別: 出勤者数 × 受電率 の相関 ---
+        st.subheader("日別 出勤者数 × 受電率 の関係")
+        st.caption("出勤者数と受電率の関係から、必要な最低人数の目安がわかります")
+
+        daily_counts = shift_df.attrs.get("daily_staff_count", {})
+        if daily_counts:
+            dr = daily_df[["日付", "曜日", "入電数", "受電対応数", "受電率"]].copy()
+            dr["日"] = dr["日付"].dt.day
+            dc = pd.DataFrame([{"日": d, "出勤者数": c} for d, c in daily_counts.items()])
+            merged = pd.merge(dr, dc, on="日", how="inner")
+
+            # 散布図
+            fig = px.scatter(
+                merged, x="出勤者数", y="受電率",
+                size="入電数", color="曜日",
+                hover_data=["日付", "入電数", "受電対応数"],
+                title="出勤者数 vs 受電率（バブルサイズ = 入電数）",
+                size_max=30,
+            )
+            fig.update_yaxes(range=[0, 100])
+            # 目標ライン
+            fig.add_hline(y=90, line_dash="dash", line_color="green",
+                          annotation_text="目標 90%", annotation_position="top left")
+            fig.update_layout(height=500)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 相関の簡易分析
+            corr = merged["出勤者数"].corr(merged["受電率"])
+            if corr > 0.3:
+                st.info(f"📊 出勤者数と受電率の相関係数: **{corr:.2f}**（正の相関あり → スタッフ増で受電率向上が期待できます）")
+            elif corr > 0:
+                st.info(f"📊 出勤者数と受電率の相関係数: **{corr:.2f}**（弱い正の相関 → スタッフ数以外の要因も大きい可能性があります）")
+            else:
+                st.info(f"📊 出勤者数と受電率の相関係数: **{corr:.2f}**（相関なし → 入電数の変動や時間帯配置の問題が大きい可能性があります）")
+
+            # 受電率90%以上の日 vs 未満の日
+            good = merged[merged["受電率"] >= 90]
+            bad = merged[merged["受電率"] < 90]
+            if not good.empty and not bad.empty:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("受電率 90%以上の日の平均出勤者数", f"{good['出勤者数'].mean():.1f}名")
+                    st.metric("受電率 90%以上の日の平均入電数", f"{good['入電数'].mean():.0f}件")
+                with col2:
+                    st.metric("受電率 90%未満の日の平均出勤者数", f"{bad['出勤者数'].mean():.1f}名")
+                    st.metric("受電率 90%未満の日の平均入電数", f"{bad['入電数'].mean():.0f}件")
+
+            # テーブル
+            st.subheader("日別データ一覧")
+            table = merged[["日付", "曜日", "入電数", "受電対応数", "受電率", "出勤者数"]].copy()
+            table["日付"] = table["日付"].dt.strftime("%m/%d")
+            table["受電率"] = table["受電率"].apply(lambda x: f"{x:.1f}%")
+            table = table.sort_values("日付")
+            st.dataframe(table, use_container_width=True, hide_index=True)
+
+
+# ----- タブ5: グループ設定 -----
 with tab_groups:
     st.subheader("⚙️ グループ設定")
     st.caption("担当者のグループ割り当てを変更できます。変更は保存ボタンで反映されます。")
