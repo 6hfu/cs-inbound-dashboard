@@ -393,11 +393,42 @@ with tab_groups:
     if unassigned:
         st.warning(f"未割当の担当者: {', '.join(sorted(unassigned))}")
 
+    # グループ並び替え
+    st.markdown("**グループの表示順**")
+    group_names = list(groups.keys())
+    reordered_names = group_names.copy()
+
+    cols_order = st.columns([4, 1, 1])
+    with cols_order[0]:
+        move_target = st.selectbox("移動するグループ", group_names, key="move_target")
+    with cols_order[1]:
+        if st.button("🔼 上へ"):
+            idx = reordered_names.index(move_target)
+            if idx > 0:
+                reordered_names[idx], reordered_names[idx - 1] = reordered_names[idx - 1], reordered_names[idx]
+                new_order = {k: groups[k] for k in reordered_names}
+                save_groups(new_order)
+                st.session_state.groups = new_order
+                st.rerun()
+    with cols_order[2]:
+        if st.button("🔽 下へ"):
+            idx = reordered_names.index(move_target)
+            if idx < len(reordered_names) - 1:
+                reordered_names[idx], reordered_names[idx + 1] = reordered_names[idx + 1], reordered_names[idx]
+                new_order = {k: groups[k] for k in reordered_names}
+                save_groups(new_order)
+                st.session_state.groups = new_order
+                st.rerun()
+
+    st.caption(f"現在の順序: {' → '.join(group_names)}")
+
+    st.markdown("---")
+
     # グループごとの編集
     new_groups = {}
-    for group_name, members in groups.items():
+    for group_name in group_names:
+        members = groups[group_name]
         st.markdown(f"**{group_name}**")
-        # 現在のメンバー + 利用可能な担当者
         available = sorted(all_staff | set(members))
         selected = st.multiselect(
             f"{group_name} のメンバー",
@@ -424,7 +455,6 @@ with tab_groups:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("💾 保存", type="primary"):
-            # 空のグループを除去
             new_groups = {k: v for k, v in new_groups.items() if v}
             save_groups(new_groups)
             st.session_state.groups = new_groups
