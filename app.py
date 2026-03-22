@@ -433,9 +433,9 @@ with tab_improve:
             priority["平均受電率"] = priority["平均受電率"].apply(lambda x: f"{x:.1f}%")
             st.dataframe(priority, use_container_width=True, hide_index=True)
 
-        # --- 2. 日別: 出勤者数 × 受電率 の相関 ---
-        st.subheader("日別 出勤者数 × 受電率 の関係")
-        st.caption("出勤者数と受電率の関係から、必要な最低人数の目安がわかります")
+        # --- 2. 日別: 一人あたり生産性 & 出勤者数 × 受電率 ---
+        st.subheader("日別 一人あたり生産性 × 受電率")
+        st.caption("出勤者数が多いのに受電率が低い日 = スタッフの稼働効率に課題あり")
 
         daily_counts = shift_df.attrs.get("daily_staff_count", {})
         if daily_counts:
@@ -443,17 +443,59 @@ with tab_improve:
             dr["日"] = dr["日付"].dt.day
             dc = pd.DataFrame([{"日": d, "出勤者数": c} for d, c in daily_counts.items()])
             merged = pd.merge(dr, dc, on="日", how="inner")
+            merged["一人あたり入電数"] = (merged["入電数"] / merged["出勤者数"]).round(1)
+            merged["一人あたり受電数"] = (merged["受電対応数"] / merged["出勤者数"]).round(1)
+            merged["日付_str"] = merged["日付"].dt.strftime("%m/%d") + "(" + merged["曜日"] + ")"
 
-            # 散布図
+            # 一人あたり受電数 × 受電率 のグラフ
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=merged["日付_str"], y=merged["一人あたり受電数"],
+                name="一人あたり受電数", marker_color="#90CAF9", opacity=0.7,
+                yaxis="y2",
+            ))
+            fig.add_trace(go.Bar(
+                x=merged["日付_str"], y=merged["一人あたり入電数"],
+                name="一人あたり入電数", marker_color="#FFCC80", opacity=0.5,
+                yaxis="y2",
+            ))
+            fig.add_trace(go.Scatter(
+                x=merged["日付_str"], y=merged["受電率"],
+                name="受電率(%)", mode="lines+markers",
+                line=dict(color="#1565C0", width=3),
+                yaxis="y1",
+            ))
+            fig.update_layout(
+                title="日別 一人あたり受電数 × 受電率",
+                yaxis=dict(title="受電率（%）", side="left", range=[0, 100]),
+                yaxis2=dict(title="一人あたり件数", overlaying="y", side="right"),
+                legend=dict(x=0, y=1.15, orientation="h"),
+                barmode="group", height=500,
+                xaxis=dict(tickangle=45),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 要注意日の検出
+            avg_per_person = merged["一人あたり受電数"].mean()
+            anomaly = merged[
+                (merged["受電率"] < 90) & (merged["一人あたり受電数"] < avg_per_person)
+            ]
+            if not anomaly.empty:
+                st.warning(
+                    f"⚠️ 受電率90%未満 かつ 一人あたり受電数が平均({avg_per_person:.1f}件)未満の日が "
+                    f"**{len(anomaly)}日**あります → スタッフはいるが活用できていない可能性"
+                )
+
+            # 散布図: 出勤者数 vs 受電率
+            st.subheader("出勤者数 × 受電率 の関係")
             fig = px.scatter(
                 merged, x="出勤者数", y="受電率",
                 size="入電数", color="曜日",
-                hover_data=["日付", "入電数", "受電対応数"],
+                hover_data=["日付_str", "入電数", "受電対応数", "一人あたり受電数"],
                 title="出勤者数 vs 受電率（バブルサイズ = 入電数）",
                 size_max=30,
             )
             fig.update_yaxes(range=[0, 100])
-            # 目標ライン
             fig.add_hline(y=90, line_dash="dash", line_color="green",
                           annotation_text="目標 90%", annotation_position="top left")
             fig.update_layout(height=500)
@@ -476,17 +518,144 @@ with tab_improve:
                 with col1:
                     st.metric("受電率 90%以上の日の平均出勤者数", f"{good['出勤者数'].mean():.1f}名")
                     st.metric("受電率 90%以上の日の平均入電数", f"{good['入電数'].mean():.0f}件")
+                    st.metric("受電率 90%以上の日の一人あたり受電数", f"{good['一人あたり受電数'].mean():.1f}件")
                 with col2:
                     st.metric("受電率 90%未満の日の平均出勤者数", f"{bad['出勤者数'].mean():.1f}名")
                     st.metric("受電率 90%未満の日の平均入電数", f"{bad['入電数'].mean():.0f}件")
+                    st.metric("受電率 90%未満の日の一人あたり受電数", f"{bad['一人あたり受電数'].mean():.1f}件")
 
             # テーブル
-            st.subheader("日別データ一覧")
-            table = merged[["日付", "曜日", "入電数", "受電対応数", "受電率", "出勤者数"]].copy()
-            table["日付"] = table["日付"].dt.strftime("%m/%d")
-            table["受電率"] = table["受電率"].apply(lambda x: f"{x:.1f}%")
+            table = merged[["日付_str", "入電数", "受電対応数", "受電率", "出勤者数",
+                            "一人あたり入電数", "一人あたり受電数"]].copy()
+            table.columns = ["日付", "入電数", "受電対応数", "受電率(%)", "出勤者数",
+                             "一人あたり入電数", "一人あたり受電数"]
+            table["受電率(%)"] = table["受電率(%)"].apply(lambda x: f"{x:.1f}%")
             table = table.sort_values("日付")
             st.dataframe(table, use_container_width=True, hide_index=True)
+
+        # --- 3. 担当者別 効率分析 ---
+        st.markdown("---")
+        st.subheader("担当者別 効率分析")
+        st.caption("一人ひとりの受電数・完了率・稼働時間から効率を比較します")
+
+        if not results_df.empty and not shift_df.empty:
+            groups = st.session_state.groups
+            # 担当者別の受電実績と稼働データを結合
+            staff_eff = results_df[["担当者", "受電数", "完了", "完了率"]].copy()
+            staff_shift = shift_df[["担当者", "稼働日数", "実績時間"]].copy()
+            staff_merged = pd.merge(staff_eff, staff_shift, on="担当者", how="inner")
+
+            if not staff_merged.empty:
+                staff_merged["一日あたり受電数"] = (
+                    staff_merged["受電数"] / staff_merged["稼働日数"]
+                ).round(1)
+                staff_merged["一時間あたり受電数"] = (
+                    staff_merged["受電数"] / staff_merged["実績時間"]
+                ).round(1)
+                staff_merged["グループ"] = staff_merged["担当者"].apply(
+                    lambda x: get_group_for(x, groups)
+                )
+
+                # 一日あたり受電数ランキング
+                col1, col2 = st.columns(2)
+                with col1:
+                    s = staff_merged.sort_values("一日あたり受電数", ascending=True)
+                    fig = px.bar(
+                        s, x="一日あたり受電数", y="担当者", orientation="h",
+                        title="担当者別 一日あたり受電数",
+                        color="グループ", text="一日あたり受電数",
+                    )
+                    fig.update_traces(textposition="outside")
+                    fig.update_layout(height=max(400, len(s) * 30))
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col2:
+                    s = staff_merged.sort_values("一時間あたり受電数", ascending=True)
+                    fig = px.bar(
+                        s, x="一時間あたり受電数", y="担当者", orientation="h",
+                        title="担当者別 一時間あたり受電数",
+                        color="グループ", text="一時間あたり受電数",
+                    )
+                    fig.update_traces(textposition="outside")
+                    fig.update_layout(height=max(400, len(s) * 30))
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # 受電数 vs 完了率 の散布図
+                fig = px.scatter(
+                    staff_merged, x="一日あたり受電数", y="完了率",
+                    size="受電数", color="グループ",
+                    hover_data=["担当者", "稼働日数", "実績時間"],
+                    title="一日あたり受電数 vs 完了率（量と質のバランス）",
+                    size_max=30, text="担当者",
+                )
+                fig.update_traces(textposition="top center", textfont_size=9)
+                fig.update_layout(height=500)
+                st.plotly_chart(fig, use_container_width=True)
+
+                # 全体平均との比較
+                avg_daily = staff_merged["一日あたり受電数"].mean()
+                avg_hourly = staff_merged["一時間あたり受電数"].mean()
+                avg_comp = staff_merged["完了率"].mean()
+
+                st.caption(f"全体平均 → 一日あたり: {avg_daily:.1f}件 / 一時間あたり: {avg_hourly:.1f}件 / 完了率: {avg_comp:.1f}%")
+
+                # テーブル
+                disp = staff_merged[["グループ", "担当者", "受電数", "稼働日数", "実績時間",
+                                     "一日あたり受電数", "一時間あたり受電数", "完了", "完了率"]].copy()
+                disp["完了率"] = disp["完了率"].apply(lambda x: f"{x:.1f}%")
+                disp = disp.sort_values("一日あたり受電数", ascending=False)
+                st.dataframe(disp, use_container_width=True, hide_index=True)
+
+        # --- 4. グループ別 生産性比較 ---
+        st.markdown("---")
+        st.subheader("グループ別 生産性比較")
+        st.caption("グループごとの一人あたり受電数・完了率を比較します")
+
+        if not results_df.empty and not shift_df.empty:
+            groups = st.session_state.groups
+            staff_eff = results_df[["担当者", "受電数", "完了", "完了率"]].copy()
+            staff_shift = shift_df[["担当者", "稼働日数", "実績時間"]].copy()
+            gm = pd.merge(staff_eff, staff_shift, on="担当者", how="inner")
+            if not gm.empty:
+                gm["グループ"] = gm["担当者"].apply(lambda x: get_group_for(x, groups))
+                gm["一日あたり受電数"] = (gm["受電数"] / gm["稼働日数"]).round(1)
+
+                g_stats = gm.groupby("グループ").agg(
+                    人数=("担当者", "count"),
+                    合計受電数=("受電数", "sum"),
+                    平均一日あたり受電数=("一日あたり受電数", "mean"),
+                    平均完了率=("完了率", "mean"),
+                    合計稼働日数=("稼働日数", "sum"),
+                    合計実績時間=("実績時間", "sum"),
+                ).round(1).reset_index()
+                g_stats["一人あたり受電数"] = (g_stats["合計受電数"] / g_stats["人数"]).round(1)
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig = px.bar(
+                        g_stats, x="グループ", y="平均一日あたり受電数",
+                        title="グループ別 平均一日あたり受電数",
+                        color="平均一日あたり受電数", color_continuous_scale="Blues",
+                        text="平均一日あたり受電数",
+                    )
+                    fig.update_traces(textposition="outside")
+                    st.plotly_chart(fig, use_container_width=True)
+                with col2:
+                    fig = px.bar(
+                        g_stats, x="グループ", y="平均完了率",
+                        title="グループ別 平均完了率（%）",
+                        color="平均完了率", color_continuous_scale="Greens",
+                        text="平均完了率",
+                    )
+                    fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                    fig.update_yaxes(range=[0, 100])
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # グループ別テーブル
+                gs_disp = g_stats[["グループ", "人数", "合計受電数", "一人あたり受電数",
+                                   "平均一日あたり受電数", "平均完了率"]].copy()
+                gs_disp["平均完了率"] = gs_disp["平均完了率"].apply(lambda x: f"{x:.1f}%")
+                st.dataframe(gs_disp, use_container_width=True, hide_index=True)
 
 
 # ----- タブ5: グループ設定 -----
