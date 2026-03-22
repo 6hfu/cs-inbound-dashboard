@@ -33,7 +33,7 @@ with col_m:
 st.caption(f"{year}年{month}月 ｜ 営業時間 10:00-19:00 ｜ データソース: Salesforce 活動の記録")
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=1800)
 def load_data(y, m):
     daily_df = fetch_daily_call_rate(y, m)
     hourly_df = fetch_hourly_call_rate(y, m)
