@@ -108,6 +108,19 @@ def _utc_range(year, month):
 BIZ_HOUR_FILTER = "HOUR_IN_DAY(CreatedDate) >= 1 AND HOUR_IN_DAY(CreatedDate) < 10"
 
 
+def fetch_all_cs_staff():
+    """CS部署の全スタッフ名を返す（グループ設定用）"""
+    sf = get_sf()
+    result = sf.query_all(
+        "SELECT Name FROM CustomObject10__c WHERE Field39__c = 'CS'"
+    )
+    names = set()
+    for r in result["records"]:
+        name = r["Name"].replace("\u3000", " ").strip()
+        names.add(name)
+    return sorted(names)
+
+
 # =============================================
 # 受電率（Zoom Call Log → Call_ID 重複除去）
 # =============================================

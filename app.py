@@ -14,6 +14,7 @@ from salesforce_client import (
     fetch_hourly_call_rate,
     fetch_call_results,
     fetch_shift_data,
+    fetch_all_cs_staff,
     load_groups,
     save_groups,
     DEFAULT_GROUPS,
@@ -374,10 +375,14 @@ with tab_groups:
 
     groups = st.session_state.groups
 
-    # 全担当者リストを取得
+    # CS全スタッフ + コール実績の担当者を統合
     all_staff = set()
+    try:
+        all_staff.update(fetch_all_cs_staff())
+    except Exception:
+        pass
     if not results_df.empty:
-        all_staff = set(results_df["担当者"].tolist())
+        all_staff.update(results_df["担当者"].tolist())
 
     assigned = set()
     for members in groups.values():
