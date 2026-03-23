@@ -490,12 +490,18 @@ with tab_shift_table:
                     .shift-table { border-collapse: separate; border-spacing: 0; width: max-content; font-size: 0.95em; }
                     .shift-table th { padding: 8px 6px; text-align: center; border: 1px solid #ddd;
                                       background: #f8f9fa; position: sticky; top: 0; z-index: 2; }
-                    .shift-table th:first-child { position: sticky; left: 0; z-index: 3; background: #f8f9fa; }
+                    .shift-table th.sticky-group { position: sticky; left: 0; z-index: 3; background: #f8f9fa; }
+                    .shift-table th.sticky-name { position: sticky; left: 70px; z-index: 3; background: #f8f9fa;
+                                                   border-right: 2px solid #ccc; }
                     .shift-table td { padding: 8px 6px; text-align: center; border: 1px solid #e0e0e0;
                                       font-size: 0.95em; }
-                    .shift-table .name-cell { text-align: left; padding-left: 12px; white-space: nowrap;
+                    .shift-table .group-cell { text-align: left; padding-left: 10px; white-space: nowrap;
+                                               font-weight: 600; min-width: 60px; max-width: 70px;
+                                               position: sticky; left: 0; z-index: 1; background: #fff;
+                                               font-size: 0.85em; color: #555; }
+                    .shift-table .name-cell { text-align: left; padding-left: 10px; white-space: nowrap;
                                                font-weight: 500; min-width: 100px; position: sticky;
-                                               left: 0; z-index: 1; background: #fff;
+                                               left: 70px; z-index: 1; background: #fff;
                                                border-right: 2px solid #ccc; }
                     .shift-table .group-header { font-weight: bold; font-size: 0.95em; padding: 8px 12px;
                                                   text-align: left; color: white; position: sticky; left: 0; }
@@ -514,7 +520,7 @@ with tab_shift_table:
 
                     # ヘッダー行
                     html += '<div class="shift-wrap"><table class="shift-table">'
-                    html += "<thead><tr><th style='min-width:90px;'>担当者</th>"
+                    html += "<thead><tr><th class='sticky-group'>グループ</th><th class='sticky-name'>担当者</th>"
                     for d in display_dates:
                         dow = d.weekday()
                         dow_class = "sat" if dow == 5 else ("sun" if dow == 6 else "")
@@ -526,19 +532,23 @@ with tab_shift_table:
                     # グループごとにセクション表示
                     display_groups = [selected_group] if selected_group != "全体" else list(members_by_group.keys())
 
+                    prev_group = None
                     for g in display_groups:
                         if g not in members_by_group:
                             continue
                         g_shifts_df = members_by_group[g]
                         g_color = GROUP_COLORS.get(g, "#546E7A")
+                        g_count = len(g_shifts_df)
 
-                        # グループヘッダー行
-                        col_span = len(display_dates) + 3
-                        html += f"<tr><td colspan='{col_span}' class='group-header' "
-                        html += f"style='background:{g_color};'>{g}（{len(g_shifts_df)}名）</td></tr>"
-
-                        for _, row in g_shifts_df.iterrows():
-                            html += f"<tr><td class='name-cell'>{row['担当者']}</td>"
+                        for row_idx, (_, row) in enumerate(g_shifts_df.iterrows()):
+                            html += "<tr>"
+                            # グループ列（rowspan で結合）
+                            if row_idx == 0:
+                                html += (
+                                    f"<td class='group-cell' rowspan='{g_count}' "
+                                    f"style='border-left:4px solid {g_color};'>{g}</td>"
+                                )
+                            html += f"<td class='name-cell'>{row['担当者']}</td>"
                             total_h = 0
                             work_days = 0
                             for d in display_dates:
@@ -562,7 +572,7 @@ with tab_shift_table:
                             html += f"<td class='total-col'>{work_days}</td></tr>"
 
                     # 集計行
-                    html += "<tr class='summary-row'><td class='name-cell'>出勤者数</td>"
+                    html += "<tr class='summary-row'><td class='group-cell' rowspan='2' style='background:#f0f0f0;'></td><td class='name-cell'>出勤者数</td>"
                     for d in display_dates:
                         cnt = sum(1 for _, row in target_shifts.iterrows() if row["日別稼働"].get(d, 0) > 0)
                         html += f"<td>{cnt}名</td>"
