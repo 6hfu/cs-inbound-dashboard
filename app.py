@@ -17,6 +17,7 @@ from salesforce_client import (
     fetch_call_results_raw,
     aggregate_call_results,
     fetch_shift_data,
+    fetch_future_shift_counts,
     fetch_all_cs_staff,
     load_groups,
     save_groups,
@@ -426,6 +427,110 @@ with tab_improve:
     if hourly_df.empty or shift_df.empty or daily_df.empty:
         st.warning("データが不足しています（受電率・稼働実績の両方が必要です）")
     else:
+        # --- 0. 今後の注意日予測 ---
+        st.subheader("今後の注意日予測")
+        st.caption("過去の曜日別傾向とシフト予定から、受電率が下がりそうな日を予測します")
+
+        days_jp = ["月", "火", "水", "木", "金", "土", "日"]
+
+        # 曜日別平均（過去データから）
+        weekday_stats = {}
+        for dow in days_jp:
+            wd = daily_df[daily_df["曜日"] == dow]
+            if not wd.empty:
+                weekday_stats[dow] = {
+                    "平均入電数": wd["入電数"].mean(),
+                    "平均受電率": wd["受電率"].mean(),
+                }
+
+        # 過去の稼働データから日別情報を取得
+        past_daily_counts = shift_df.attrs.get("daily_staff_count", {})
+        past_daily_hours = {}
+        for _, row in shift_df.iterrows():
+            for d, h in row["日別稼働"].items():
+                past_daily_hours[d] = past_daily_hours.get(d, 0) + h
+
+        # 過去の平均（出勤者数・稼働時間・一人あたり入電数）
+        if past_daily_counts:
+            avg_past_staff = sum(past_daily_counts.values()) / len(past_daily_counts)
+            avg_past_hours = sum(past_daily_hours.values()) / len(past_daily_hours) if past_daily_hours else 0
+        else:
+            avg_past_staff = 0
+            avg_past_hours = 0
+
+        # 未来のシフト予定を取得（明日〜1ヶ月先）
+        tomorrow = today + timedelta(days=1)
+        future_end = date(today.year + (1 if today.month == 12 else 0),
+                          1 if today.month == 12 else today.month + 1,
+                          _month_end(today.year + (1 if today.month == 12 else 0),
+                                     1 if today.month == 12 else today.month + 1).day)
+
+        @st.cache_data(ttl=21600)
+        def _load_future_shifts(s, e):
+            return fetch_future_shift_counts(s, e)
+
+        future_shifts = _load_future_shifts(tomorrow, future_end)
+
+        if future_shifts and weekday_stats:
+            forecast_rows = []
+            for d, shift_info in future_shifts.items():
+                dow = days_jp[d.weekday()]
+                if dow not in weekday_stats:
+                    continue
+
+                expected_calls = weekday_stats[dow]["平均入電数"]
+                staff_count = shift_info["出勤予定数"]
+                hours_total = shift_info["稼働時間予定"]
+                expected_per_person = expected_calls / staff_count if staff_count > 0 else 999
+
+                # リスク判定と原因分析
+                risks = []
+                if staff_count < avg_past_staff * 0.85:
+                    risks.append(f"出勤者少なめ（{staff_count}名、過去平均{avg_past_staff:.0f}名）")
+                if hours_total < avg_past_hours * 0.85:
+                    risks.append(f"稼働時間少なめ（{hours_total:.1f}h、過去平均{avg_past_hours:.0f}h）")
+                if expected_calls > daily_df["入電数"].mean() * 1.15:
+                    risks.append(f"{dow}曜は入電が多い傾向（予想{expected_calls:.0f}件）")
+                if weekday_stats[dow]["平均受電率"] < 90:
+                    risks.append(f"{dow}曜は受電率が低い傾向（過去平均{weekday_stats[dow]['平均受電率']:.1f}%）")
+
+                if risks:
+                    risk_level = "🔴 要注意" if len(risks) >= 2 else "🟡 注意"
+                else:
+                    risk_level = "🟢 問題なし"
+
+                forecast_rows.append({
+                    "日付": d.strftime("%m/%d") + f"({dow})",
+                    "予想入電数": f"{expected_calls:.0f}件",
+                    "出勤予定": f"{staff_count}名",
+                    "稼働時間予定": f"{hours_total:.1f}h",
+                    "判定": risk_level,
+                    "risks": risks,
+                })
+
+            # 注意日だけ先に表示
+            alert_rows = [r for r in forecast_rows if r["判定"] != "🟢 問題なし"]
+            if alert_rows:
+                st.warning(f"今後 **{len(alert_rows)}日** に注意が必要です")
+                for r in alert_rows:
+                    icon = "🔴" if "要注意" in r["判定"] else "🟡"
+                    st.markdown(
+                        f"**{icon} {r['日付']}** — 予想入電{r['予想入電数']} / "
+                        f"出勤予定{r['出勤予定']} / 稼働{r['稼働時間予定']}"
+                    )
+                    for risk in r["risks"]:
+                        st.markdown(f"　　→ {risk}")
+            else:
+                st.success("今後のシフトに大きな問題は見られません")
+
+            # 全日一覧テーブル
+            forecast_df = pd.DataFrame(forecast_rows)[["判定", "日付", "予想入電数", "出勤予定", "稼働時間予定"]]
+            st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("今後のシフトデータが登録されていないか、過去データが不足しています")
+
+        st.markdown("---")
+
         # --- 1. 時間帯別の優先度 ---
         st.subheader("時間帯別 増員の優先度")
         st.caption("受電率が低く入電が多い時間帯ほど、スタッフ増員の効果が高い")
