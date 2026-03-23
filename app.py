@@ -154,6 +154,7 @@ with tab_results:
     else:
         groups = st.session_state.groups
         results_df["グループ"] = results_df["担当者"].apply(lambda x: get_group_for(x, groups))
+        results_df = results_df[results_df["グループ"] != "未割当"]
 
         # 全体メトリクス
         total_calls = int(results_df["受電数"].sum())
@@ -197,7 +198,7 @@ with tab_results:
 
         # 担当者別
         st.subheader("担当者別実績")
-        group_filter = st.selectbox("グループで絞り込み", ["全て"] + list(groups.keys()) + ["未割当"])
+        group_filter = st.selectbox("グループで絞り込み", ["全て"] + list(groups.keys()))
         if group_filter != "全て":
             filtered = results_df[results_df["グループ"] == group_filter]
         else:
@@ -237,6 +238,12 @@ with tab_shift:
     if shift_df.empty:
         st.warning("該当月のデータがありません")
     else:
+        groups = st.session_state.groups
+        assigned_names = set()
+        for members in groups.values():
+            assigned_names.update(members)
+        shift_df = shift_df[shift_df["担当者"].isin(assigned_names)]
+
         m1, m2, m3 = st.columns(3)
         m1.metric("スタッフ数", f"{len(shift_df)}名")
         m2.metric("平均稼働日数", f"{shift_df['稼働日数'].mean():.1f}日")
