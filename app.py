@@ -238,12 +238,6 @@ with tab_shift:
     if shift_df.empty:
         st.warning("該当月のデータがありません")
     else:
-        groups = st.session_state.groups
-        assigned_names = set()
-        for members in groups.values():
-            assigned_names.update(members)
-        shift_df = shift_df[shift_df["担当者"].isin(assigned_names)]
-
         m1, m2, m3 = st.columns(3)
         m1.metric("スタッフ数", f"{len(shift_df)}名")
         m2.metric("平均稼働日数", f"{shift_df['稼働日数'].mean():.1f}日")
