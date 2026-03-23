@@ -197,7 +197,19 @@ with st.spinner("Salesforceからデータ取得中..."):
 
 # グループ設定の読み込み
 if "groups" not in st.session_state:
-    st.session_state.groups = load_groups()
+    _saved = load_groups()
+    st.session_state.groups = {k: v for k, v in _saved.items() if not k.startswith("_")}
+    st.session_state.headcount_exclude = set(_saved.get("_headcount_exclude", []))
+
+
+def get_headcount_members(groups, exclude_set):
+    """頭数カウント対象のメンバー名セットを返す"""
+    members = set()
+    for g, m_list in groups.items():
+        if g.startswith("_"):
+            continue
+        members.update(m_list)
+    return members - exclude_set
 
 
 def get_group_for(name, groups):
@@ -689,11 +701,10 @@ with tab_improve:
                           _month_end(today.year + (1 if today.month == 12 else 0),
                                      1 if today.month == 12 else today.month + 1).day)
 
-        # グループ所属メンバーだけで集計
+        # グループ所属メンバーだけで集計（頭数除外メンバーを除く）
         groups = st.session_state.groups
-        group_member_names = set()
-        for members in groups.values():
-            group_member_names.update(members)
+        headcount_exclude = st.session_state.headcount_exclude
+        group_member_names = get_headcount_members(groups, headcount_exclude)
 
         @st.cache_data(ttl=21600)
         def _load_future_shifts(s, e, members_tuple):
@@ -1122,6 +1133,28 @@ with tab_groups:
         )
         new_groups[group_name] = selected
 
+    # 頭数除外設定
+    st.markdown("---")
+    st.subheader("頭数カウント除外設定")
+    st.caption("チェックしたメンバーは受電率予測・必要人数の計算から除外されます（例: 責任者など受電を取らない方）")
+
+    current_exclude = st.session_state.headcount_exclude.copy()
+    all_members_for_exclude = []
+    for g_name in group_names:
+        for m in groups.get(g_name, []):
+            all_members_for_exclude.append((g_name, m))
+
+    exclude_cols = st.columns(3)
+    new_exclude = set()
+    for i, (g_name, member) in enumerate(all_members_for_exclude):
+        with exclude_cols[i % 3]:
+            if st.checkbox(
+                f"{member}（{g_name}）",
+                value=member in current_exclude,
+                key=f"exclude_{member}",
+            ):
+                new_exclude.add(member)
+
     # 新規グループ追加
     st.markdown("---")
     st.markdown("**新しいグループを追加**")
@@ -1140,14 +1173,17 @@ with tab_groups:
     with col1:
         if st.button("💾 保存", type="primary"):
             new_groups = {k: v for k, v in new_groups.items() if v}
+            new_groups["_headcount_exclude"] = sorted(new_exclude)
             save_groups(new_groups)
-            st.session_state.groups = new_groups
+            st.session_state.groups = {k: v for k, v in new_groups.items() if not k.startswith("_")}
+            st.session_state.headcount_exclude = new_exclude
             st.success("保存しました")
             st.rerun()
     with col2:
         if st.button("🔄 デフォルトに戻す"):
             save_groups(DEFAULT_GROUPS)
             st.session_state.groups = DEFAULT_GROUPS
+            st.session_state.headcount_exclude = set()
             st.success("デフォルトに戻しました")
             st.rerun()
 
@@ -1155,4 +1191,10 @@ with tab_groups:
     st.markdown("---")
     st.subheader("現在の設定")
     for g, members in groups.items():
-        st.markdown(f"**{g}**: {', '.join(members)}")
+        member_display = []
+        for m in members:
+            if m in st.session_state.headcount_exclude:
+                member_display.append(f"~~{m}~~（除外）")
+            else:
+                member_display.append(m)
+        st.markdown(f"**{g}**: {', '.join(member_display)}")
