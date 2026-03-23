@@ -502,6 +502,15 @@ with tab_improve:
                 # データ不足時は曜日平均にフォールバック
                 return past_merged["受電率"].mean()
 
+            # 受電率90%以上の日の一人あたり入電数を目標値として算出
+            good_days = past_merged[past_merged["受電率"] >= 90]
+            if not good_days.empty:
+                target_per_person = good_days["一人あたり入電数"].mean()
+            else:
+                target_per_person = avg_per_person_all * 0.85
+            # 一人あたり平均稼働時間
+            avg_hours_per_staff = avg_past_hours / avg_past_staff if avg_past_staff > 0 else 8.0
+
             forecast_rows = []
             for d, shift_info in future_shifts.items():
                 dow = days_jp[d.weekday()]
@@ -518,7 +527,12 @@ with tab_improve:
                 per_person = expected_calls / staff_count
                 estimated_rate = estimate_rate(per_person)
 
-                # 原因分析
+                # 90%達成に必要な人数・時間を逆算
+                needed_staff = int(expected_calls / target_per_person + 0.99)  # 切り上げ
+                add_staff = max(0, needed_staff - staff_count)
+                add_hours = round(add_staff * avg_hours_per_staff, 1)
+
+                # 原因分析 + 追加目安
                 risks = []
                 if estimated_rate < 90:
                     if staff_count < avg_past_staff * 0.85:
@@ -544,9 +558,12 @@ with tab_improve:
                     "出勤予定": f"{staff_count}名",
                     "一人あたり": f"{per_person:.1f}件",
                     "予想受電率": f"{estimated_rate:.1f}%",
+                    "追加人数目安": f"+{add_staff}名" if add_staff > 0 else "—",
+                    "追加時間目安": f"+{add_hours}h" if add_hours > 0 else "—",
                     "判定": risk_level,
                     "risks": risks,
-                    "_rate": estimated_rate,
+                    "_add_staff": add_staff,
+                    "_add_hours": add_hours,
                 })
 
             # 注意日だけ先に表示（日付順）
@@ -555,9 +572,13 @@ with tab_improve:
                 st.warning(f"受電率が落ち込みそうな日が **{len(alert_rows)}日** あります")
                 for r in alert_rows:
                     icon = "🔴" if "要注意" in r["判定"] else "🟡"
+                    supplement = ""
+                    if r["_add_staff"] > 0:
+                        supplement = f" → **{r['追加人数目安']}（{r['追加時間目安']}）追加で90%見込み**"
                     st.markdown(
                         f"**{icon} {r['日付']}** — 予想受電率 **{r['予想受電率']}** "
                         f"（予想入電{r['予想入電数']} ÷ 出勤{r['出勤予定']} = 一人あたり{r['一人あたり']}）"
+                        f"{supplement}"
                     )
                     for risk in r["risks"]:
                         st.markdown(f"　　→ {risk}")
@@ -565,7 +586,9 @@ with tab_improve:
                 st.success("今後のシフトに大きな問題は見られません")
 
             # 全日一覧テーブル
-            forecast_df = pd.DataFrame(forecast_rows)[["判定", "日付", "予想入電数", "出勤予定", "一人あたり", "予想受電率"]]
+            forecast_df = pd.DataFrame(forecast_rows)[
+                ["判定", "日付", "予想入電数", "出勤予定", "一人あたり", "予想受電率", "追加人数目安", "追加時間目安"]
+            ]
             st.dataframe(forecast_df, use_container_width=True, hide_index=True)
         else:
             st.info("今後のシフトデータが登録されていないか、過去データが不足しています")
