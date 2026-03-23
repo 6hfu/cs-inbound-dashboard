@@ -468,7 +468,16 @@ with tab_improve:
             merged = pd.merge(dr, dc, on="日付_date", how="inner")
             merged = pd.merge(merged, dh, on="日付_date", how="left").fillna(0)
             merged["一人あたり入電数"] = (merged["入電数"] / merged["出勤者数"]).round(1)
+            merged["一人あたり受電数"] = (merged["受電対応数"] / merged["出勤者数"]).round(1)
+            merged["一時間あたり入電数"] = (merged["入電数"] / merged["稼働時間合計"].replace(0, float("nan"))).round(2)
             merged["日付_str"] = merged["日付"].dt.strftime("%m/%d") + "(" + merged["曜日"] + ")"
+
+            # 平均値の計算
+            avg_staff = merged["出勤者数"].mean()
+            avg_hours = merged["稼働時間合計"].mean()
+            avg_calls = merged["入電数"].mean()
+            avg_per_person = merged["一人あたり受電数"].mean()
+            avg_rate = merged["受電率"].mean()
 
             # 危険度判定
             def calc_risk(row):
@@ -480,17 +489,95 @@ with tab_improve:
                     return "🟢 良好"
             merged["判定"] = merged.apply(calc_risk, axis=1)
 
+            # 日別の原因分析
+            def diagnose_day(row):
+                causes = []
+                if row["出勤者数"] < avg_staff * 0.85:
+                    causes.append(f"出勤者不足（{row['出勤者数']:.0f}名、平均{avg_staff:.1f}名）")
+                if row["稼働時間合計"] < avg_hours * 0.85:
+                    causes.append(f"稼働時間不足（{row['稼働時間合計']:.1f}h、平均{avg_hours:.1f}h）")
+                if row["入電数"] > avg_calls * 1.15:
+                    causes.append(f"入電数が多い（{row['入電数']}件、平均{avg_calls:.0f}件）")
+                if row["一人あたり受電数"] < avg_per_person * 0.8:
+                    causes.append(f"一人あたり受電効率が低い（{row['一人あたり受電数']:.1f}件、平均{avg_per_person:.1f}件）")
+                if not causes:
+                    causes.append("複合的な要因（個別の突出した原因なし）")
+                return causes
+            merged["原因"] = merged.apply(diagnose_day, axis=1)
+
             # 危険日アラート
             danger_days = merged[merged["判定"].isin(["🔴 危険", "🟡 注意"])]
             if not danger_days.empty:
                 st.error(f"受電率90%未満の日が **{len(danger_days)}日** あります")
                 for _, row in danger_days.iterrows():
+                    icon = "🔴" if row["判定"] == "🔴 危険" else "🟡"
                     st.markdown(
-                        f"- **{row['日付_str']}** 受電率 {row['受電率']:.1f}% / "
-                        f"出勤{row['出勤者数']}名 / 取りこぼし{row['取りこぼし']}件"
+                        f"**{icon} {row['日付_str']}** — 受電率 {row['受電率']:.1f}% / "
+                        f"出勤{row['出勤者数']:.0f}名 / 取りこぼし{row['取りこぼし']}件"
                     )
+                    for cause in row["原因"]:
+                        st.markdown(f"　　→ {cause}")
             else:
                 st.success("全日 受電率90%以上で問題なし")
+
+            # --- 期間全体のアドバイス ---
+            st.subheader("この期間の総合アドバイス")
+            total_missed = int(merged["取りこぼし"].sum())
+            period_rate = (merged["受電対応数"].sum() / merged["入電数"].sum() * 100) if merged["入電数"].sum() > 0 else 0
+            num_danger = len(danger_days)
+            advices = []
+
+            # 出勤者数の不足傾向
+            low_staff_days = merged[merged["出勤者数"] < avg_staff * 0.85]
+            if not low_staff_days.empty:
+                advices.append(
+                    f"📋 **出勤者数が平均を下回った日が{len(low_staff_days)}日**あります。"
+                    f"シフト調整で出勤者数を平均{avg_staff:.0f}名以上に保てると受電率改善が見込めます。"
+                )
+
+            # 入電数の集中
+            high_call_days = merged[merged["入電数"] > avg_calls * 1.15]
+            if not high_call_days.empty:
+                advices.append(
+                    f"📞 **入電が集中した日が{len(high_call_days)}日**あります（平均{avg_calls:.0f}件超）。"
+                    f"曜日や月初・月末の傾向を確認し、繁忙日に増員配置すると効果的です。"
+                )
+
+            # 一人あたり効率
+            low_eff_days = merged[merged["一人あたり受電数"] < avg_per_person * 0.8]
+            if not low_eff_days.empty and len(low_eff_days) >= 3:
+                advices.append(
+                    f"⚡ **一人あたり受電効率が低い日が{len(low_eff_days)}日**あります。"
+                    f"離席時間の見直しや受電体制の改善で、一人あたり平均{avg_per_person:.1f}件を目指しましょう。"
+                )
+
+            # 稼働時間の不足
+            low_hours_days = merged[merged["稼働時間合計"] < avg_hours * 0.85]
+            if not low_hours_days.empty:
+                advices.append(
+                    f"🕐 **稼働時間が不足した日が{len(low_hours_days)}日**あります。"
+                    f"短時間勤務の集中やシフト偏りがないか確認してください。"
+                )
+
+            # 全体が良好な場合
+            if not advices:
+                if period_rate >= 95:
+                    advices.append("✅ 受電率95%以上を維持できています。現在の体制を継続してください。")
+                elif period_rate >= 90:
+                    advices.append("✅ 受電率90%以上で安定しています。あと少しの改善で95%到達も狙えます。")
+
+            # 総括
+            if num_danger > 0:
+                summary = (
+                    f"期間内の受電率は **{period_rate:.1f}%**、取りこぼしは合計 **{total_missed}件** です。"
+                    f"要注意日{num_danger}日の主な原因に対処することで改善が見込めます。"
+                )
+            else:
+                summary = f"期間内の受電率は **{period_rate:.1f}%**、取りこぼしは合計 **{total_missed}件** です。"
+
+            st.info(summary)
+            for advice in advices:
+                st.markdown(advice)
 
             # メインチャート
             fig = go.Figure()
