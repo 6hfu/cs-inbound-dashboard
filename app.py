@@ -566,30 +566,39 @@ with tab_improve:
                     "_add_hours": add_hours,
                 })
 
-            # 注意日だけ先に表示（日付順）
+            # 注意日
             alert_rows = [r for r in forecast_rows if r["判定"] != "🟢 問題なし"]
-            if alert_rows:
-                st.warning(f"受電率が落ち込みそうな日が **{len(alert_rows)}日** あります")
-                for r in alert_rows:
-                    icon = "🔴" if "要注意" in r["判定"] else "🟡"
-                    supplement = ""
-                    if r["_add_staff"] > 0:
-                        supplement = f" → **{r['追加人数目安']}（{r['追加時間目安']}）追加で90%見込み**"
-                    st.markdown(
-                        f"**{icon} {r['日付']}** — 予想受電率 **{r['予想受電率']}** "
-                        f"（予想入電{r['予想入電数']} ÷ 出勤{r['出勤予定']} = 一人あたり{r['一人あたり']}）"
-                        f"{supplement}"
-                    )
-                    for risk in r["risks"]:
-                        st.markdown(f"　　→ {risk}")
-            else:
-                st.success("今後のシフトに大きな問題は見られません")
+            critical_rows = [r for r in forecast_rows if r["判定"] == "🔴 要注意"]
+            warn_rows = [r for r in forecast_rows if r["判定"] == "🟡 注意"]
+            ok_rows = [r for r in forecast_rows if r["判定"] == "🟢 問題なし"]
 
-            # 全日一覧テーブル
-            forecast_df = pd.DataFrame(forecast_rows)[
-                ["判定", "日付", "予想入電数", "出勤予定", "一人あたり", "予想受電率", "追加人数目安", "追加時間目安"]
-            ]
-            st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+            if alert_rows:
+                # サマリー
+                parts = []
+                if critical_rows:
+                    parts.append(f"🔴要注意 **{len(critical_rows)}日**")
+                if warn_rows:
+                    parts.append(f"🟡注意 **{len(warn_rows)}日**")
+                parts.append(f"🟢問題なし {len(ok_rows)}日")
+                st.warning("　".join(parts))
+
+                # 注意日テーブル（追加目安付き）
+                alert_df = pd.DataFrame(alert_rows)[
+                    ["判定", "日付", "予想受電率", "予想入電数", "出勤予定", "一人あたり", "追加人数目安", "追加時間目安"]
+                ]
+                st.dataframe(alert_df, use_container_width=True, hide_index=True)
+
+                # 特に危険な日（🔴）だけ詳細を表示
+                if critical_rows:
+                    st.markdown("**特に注意が必要な日：**")
+                    for r in critical_rows:
+                        st.markdown(
+                            f"- **{r['日付']}** 予想受電率{r['予想受電率']}"
+                            f"（{r['出勤予定']}で入電{r['予想入電数']}）"
+                            f" → **{r['追加人数目安']}（{r['追加時間目安']}）追加で90%見込み**"
+                        )
+            else:
+                st.success(f"今後のシフトに大きな問題は見られません（全{len(ok_rows)}日 問題なし）")
         else:
             st.info("今後のシフトデータが登録されていないか、過去データが不足しています")
 
