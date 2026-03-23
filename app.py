@@ -5,6 +5,7 @@
 """
 
 import json
+from datetime import date, timedelta
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -24,25 +25,57 @@ st.set_page_config(page_title="CS入電 分析ダッシュボード", page_icon=
 
 st.title("📞 CS入電 分析ダッシュボード")
 
-col_y, col_m, _ = st.columns([1, 1, 4])
-with col_y:
-    year = st.selectbox("年", [2026, 2025], index=0)
-with col_m:
-    month = st.selectbox("月", list(range(1, 13)), index=2)
+# --- 期間選択 ---
+today = date.today()
+this_month_start = today.replace(day=1)
+if today.month == 1:
+    last_month_start = date(today.year - 1, 12, 1)
+else:
+    last_month_start = date(today.year, today.month - 1, 1)
+last_month_end = this_month_start - timedelta(days=1)
+this_week_start = today - timedelta(days=today.weekday())
+last_week_start = this_week_start - timedelta(days=7)
+last_week_end = this_week_start - timedelta(days=1)
 
-st.caption(f"{year}年{month}月 ｜ 営業時間 10:00-19:00 ｜ データソース: Salesforce")
+presets = {
+    "今月": (this_month_start, today),
+    "先月": (last_month_start, last_month_end),
+    "今週": (this_week_start, today),
+    "先週": (last_week_start, last_week_end),
+    "直近7日": (today - timedelta(days=6), today),
+    "直近14日": (today - timedelta(days=13), today),
+    "カスタム": None,
+}
+
+col_preset, col_start, col_end, _ = st.columns([1.5, 1.2, 1.2, 3])
+with col_preset:
+    preset = st.selectbox("期間", list(presets.keys()))
+
+if preset == "カスタム":
+    with col_start:
+        start_date = st.date_input("開始日", this_month_start)
+    with col_end:
+        end_date = st.date_input("終了日", today)
+else:
+    start_date, end_date = presets[preset]
+    with col_start:
+        st.date_input("開始日", start_date, disabled=True)
+    with col_end:
+        st.date_input("終了日", end_date, disabled=True)
+
+st.caption(f"{start_date.strftime('%Y/%m/%d')} 〜 {end_date.strftime('%Y/%m/%d')} ｜ 営業時間 10:00-19:00 ｜ データソース: Salesforce")
 
 
 @st.cache_data(ttl=1800)
-def load_data(y, m):
-    daily_df = fetch_daily_call_rate(y, m)
-    hourly_df = fetch_hourly_call_rate(y, m)
-    results_df, result_labels = fetch_call_results(y, m)
-    shift_df = fetch_shift_data(y, m)
+def load_data(s, e):
+    daily_df = fetch_daily_call_rate(s, e)
+    hourly_df = fetch_hourly_call_rate(s, e)
+    results_df, result_labels = fetch_call_results(s, e)
+    shift_df = fetch_shift_data(s, e)
     return daily_df, hourly_df, results_df, result_labels, shift_df
 
 with st.spinner("Salesforceからデータ取得中..."):
-    daily_df, hourly_df, results_df, result_labels, shift_df = load_data(year, month)
+    daily_df, hourly_df, results_df, result_labels, shift_df = load_data(start_date, end_date)
 
 
 # グループ設定の読み込み
@@ -246,9 +279,9 @@ with tab_shift:
         daily_counts = shift_df.attrs.get("daily_staff_count", {})
         if daily_counts:
             dc_df = pd.DataFrame([
-                {"日": f"{d}日", "出勤者数": c} for d, c in sorted(daily_counts.items())
+                {"日付": d.strftime("%m/%d"), "出勤者数": c} for d, c in sorted(daily_counts.items())
             ])
-            fig = px.bar(dc_df, x="日", y="出勤者数", title="日別 出勤者数",
+            fig = px.bar(dc_df, x="日付", y="出勤者数", title="日別 出勤者数",
                          color="出勤者数", color_continuous_scale="Purples", text="出勤者数")
             fig.update_traces(textposition="outside")
             st.plotly_chart(fig, use_container_width=True)
@@ -313,17 +346,17 @@ with tab_improve:
         daily_counts = shift_df.attrs.get("daily_staff_count", {})
         if daily_counts:
             dr = daily_df[["日付", "曜日", "入電数", "受電対応数", "受電率", "取りこぼし"]].copy()
-            dr["日"] = dr["日付"].dt.day
-            dc = pd.DataFrame([{"日": d, "出勤者数": c} for d, c in daily_counts.items()])
+            dr["日付_date"] = dr["日付"].dt.date
+            dc = pd.DataFrame([{"日付_date": d, "出勤者数": c} for d, c in daily_counts.items()])
 
             daily_hours = {}
             for _, row in shift_df.iterrows():
                 for day, hours in row["日別稼働"].items():
                     daily_hours[day] = daily_hours.get(day, 0) + hours
-            dh = pd.DataFrame([{"日": d, "稼働時間合計": round(h, 1)} for d, h in daily_hours.items()])
+            dh = pd.DataFrame([{"日付_date": d, "稼働時間合計": round(h, 1)} for d, h in daily_hours.items()])
 
-            merged = pd.merge(dr, dc, on="日", how="inner")
-            merged = pd.merge(merged, dh, on="日", how="left").fillna(0)
+            merged = pd.merge(dr, dc, on="日付_date", how="inner")
+            merged = pd.merge(merged, dh, on="日付_date", how="left").fillna(0)
             merged["一人あたり入電数"] = (merged["入電数"] / merged["出勤者数"]).round(1)
             merged["日付_str"] = merged["日付"].dt.strftime("%m/%d") + "(" + merged["曜日"] + ")"
 

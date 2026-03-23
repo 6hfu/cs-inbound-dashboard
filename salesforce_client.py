@@ -11,7 +11,7 @@
 
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -96,13 +96,27 @@ def _resolve_user_names(sf, user_ids):
     return {uid: _user_name_cache.get(uid, "不明") for uid in user_ids}
 
 
-def _utc_range(year, month):
-    jst_start = datetime(year, month, 1)
-    jst_end = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+def _utc_range(start_date, end_date):
+    """date → SOQL用UTC文字列に変換（JST→UTC -9h、end_dateは翌日0時まで）"""
+    jst_start = datetime(start_date.year, start_date.month, start_date.day)
+    jst_end = datetime(end_date.year, end_date.month, end_date.day) + timedelta(days=1)
     return (
         (jst_start - timedelta(hours=9)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         (jst_end - timedelta(hours=9)).strftime("%Y-%m-%dT%H:%M:%SZ"),
     )
+
+
+def _months_in_range(start_date, end_date):
+    """日付範囲に含まれる(year, month)のリストを返す"""
+    months = []
+    d = start_date.replace(day=1)
+    while d <= end_date:
+        months.append((d.year, d.month))
+        if d.month == 12:
+            d = date(d.year + 1, 1, 1)
+        else:
+            d = date(d.year, d.month + 1, 1)
+    return months
 
 
 BIZ_HOUR_FILTER = "HOUR_IN_DAY(CreatedDate) >= 1 AND HOUR_IN_DAY(CreatedDate) < 10"
@@ -125,9 +139,9 @@ def fetch_all_cs_staff():
 # 受電率（Zoom Call Log → Call_ID 重複除去）
 # =============================================
 
-def _fetch_zoom_inbound(year, month):
+def _fetch_zoom_inbound(start_date, end_date):
     sf = get_sf()
-    utc_start, utc_end = _utc_range(year, month)
+    utc_start, utc_end = _utc_range(start_date, end_date)
     result = sf.query_all(
         f"SELECT ZVC__Call_ID__c, ZVC__Call_Result__c, ZVC__Ring_Start_Time__c "
         f"FROM ZVC__Zoom_Call_Log__c "
@@ -148,8 +162,8 @@ def _fetch_zoom_inbound(year, month):
     return calls
 
 
-def fetch_daily_call_rate(year=2026, month=3):
-    calls = _fetch_zoom_inbound(year, month)
+def fetch_daily_call_rate(start_date, end_date):
+    calls = _fetch_zoom_inbound(start_date, end_date)
     days_jp = ["月", "火", "水", "木", "金", "土", "日"]
     daily = defaultdict(lambda: {"total": 0, "answered": 0})
 
@@ -163,9 +177,9 @@ def fetch_daily_call_rate(year=2026, month=3):
             daily[key]["answered"] += 1
 
     rows = []
-    for date in sorted(daily.keys()):
-        d = daily[date]
-        dt = datetime.combine(date, datetime.min.time())
+    for dt_date in sorted(daily.keys()):
+        d = daily[dt_date]
+        dt = datetime.combine(dt_date, datetime.min.time())
         rate = (d["answered"] / d["total"] * 100) if d["total"] > 0 else 0
         rows.append({
             "日付": dt, "曜日": days_jp[dt.weekday()],
@@ -175,8 +189,8 @@ def fetch_daily_call_rate(year=2026, month=3):
     return pd.DataFrame(rows)
 
 
-def fetch_hourly_call_rate(year=2026, month=3):
-    calls = _fetch_zoom_inbound(year, month)
+def fetch_hourly_call_rate(start_date, end_date):
+    calls = _fetch_zoom_inbound(start_date, end_date)
     hourly = defaultdict(lambda: defaultdict(lambda: {"total": 0, "answered": 0}))
 
     for cid, info in calls.items():
@@ -188,10 +202,10 @@ def fetch_hourly_call_rate(year=2026, month=3):
             hourly[jst.date()][jst.hour]["answered"] += 1
 
     rows = []
-    for date in sorted(hourly.keys()):
-        dt = datetime.combine(date, datetime.min.time())
-        for hr in sorted(hourly[date].keys()):
-            d = hourly[date][hr]
+    for dt_date in sorted(hourly.keys()):
+        dt = datetime.combine(dt_date, datetime.min.time())
+        for hr in sorted(hourly[dt_date].keys()):
+            d = hourly[dt_date][hr]
             rate = (d["answered"] / d["total"] * 100) if d["total"] > 0 else 0
             rows.append({
                 "日付": dt, "時間帯": f"{hr}時", "時間帯_num": hr,
@@ -210,10 +224,10 @@ RESULT_FIELD = "Field4_del__c"
 TYPE_FIELD = "Field3_del__c"
 
 
-def fetch_call_results(year=2026, month=3):
+def fetch_call_results(start_date, end_date):
     """担当者別のコール処理結果（完了、対応依頼、キャンセル等）"""
     sf = get_sf()
-    utc_start, utc_end = _utc_range(year, month)
+    utc_start, utc_end = _utc_range(start_date, end_date)
 
     # 受電のピックリスト値を取得
     desc = sf.Task.describe()
@@ -225,11 +239,10 @@ def fetch_call_results(year=2026, month=3):
                 if pv["active"] and pv["value"] in ("受電",):
                     juden_val = pv["value"]
                     break
-                # Fallback: second value is 受電
             if not juden_val:
                 active_vals = [pv["value"] for pv in f.get("picklistValues", []) if pv["active"]]
                 if len(active_vals) >= 2:
-                    juden_val = active_vals[1]  # 受電 is second
+                    juden_val = active_vals[1]
         if f["name"] == RESULT_FIELD:
             result_labels = [pv["value"] for pv in f.get("picklistValues", []) if pv["active"]]
 
@@ -258,7 +271,6 @@ def fetch_call_results(year=2026, month=3):
         name = names.get(uid, "不明")
         total = sum(results.values())
         completed = results.get("完了", 0)
-        # 完了のピックリスト値が文字化けしている場合のフォールバック
         if completed == 0:
             for k, v in results.items():
                 if "完了" in k or k == result_labels[7] if len(result_labels) > 7 else False:
@@ -273,7 +285,6 @@ def fetch_call_results(year=2026, month=3):
             "完了": completed,
             "完了率": round(comp_rate, 2),
         }
-        # 各結果を列に追加
         for k, v in results.items():
             if k != "完了":
                 row[k] = v
@@ -282,7 +293,6 @@ def fetch_call_results(year=2026, month=3):
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.fillna(0)
-        # 数値列を整数に
         for col in df.columns:
             if col not in ("担当者", "完了率"):
                 try:
@@ -297,11 +307,15 @@ def fetch_call_results(year=2026, month=3):
 # 稼働実績
 # =============================================
 
-def fetch_shift_data(year=2026, month=3):
+def _normalize_name(name):
+    return name.replace("\u3000", " ").strip()
+
+
+def fetch_shift_data(start_date, end_date):
     sf = get_sf()
+    utc_start, utc_end = _utc_range(start_date, end_date)
 
     # 受電対応した人のUser IDを取得
-    utc_start, utc_end = _utc_range(year, month)
     desc = sf.Task.describe()
     juden_val = None
     for f in desc["fields"]:
@@ -329,58 +343,72 @@ def fetch_shift_data(year=2026, month=3):
         "SELECT Id, Name FROM CustomObject10__c WHERE Field39__c = 'CS'"
     )
 
-    def normalize(name):
-        return name.replace("\u3000", " ").strip()
-
-    operator_name_set = {normalize(n) for n in operator_names.values()}
+    operator_name_set = {_normalize_name(n) for n in operator_names.values()}
     hr_map = {}
     for r in hr_result["records"]:
-        if normalize(r["Name"]) in operator_name_set:
+        if _normalize_name(r["Name"]) in operator_name_set:
             hr_map[r["Id"]] = r["Name"]
 
     if not hr_map:
         return pd.DataFrame()
 
     ids_str = "','".join(hr_map.keys())
-    month_str = f"{month}月"
     day_fields = ", ".join([f"Field{129 + i}__c" for i in range(31)])
 
-    work_result = sf.query_all(
-        f"SELECT Id, Name, Field128__c, Field164__c, Field160__c, Field161__c, "
-        f"{day_fields} "
-        f"FROM CustomObject11__c "
-        f"WHERE Field2__c = '{month_str}' "
-        f"AND Field128__c IN ('{ids_str}')"
-    )
+    # 範囲に含まれる月ごとにシフトデータを取得
+    staff_data = {}  # normalized_name -> dict
+    daily_counts = defaultdict(int)  # date -> 出勤者数
+
+    for yr, mo in _months_in_range(start_date, end_date):
+        month_str = f"{mo}月"
+        work_result = sf.query_all(
+            f"SELECT Id, Name, Field128__c, Field160__c, Field161__c, "
+            f"{day_fields} "
+            f"FROM CustomObject11__c "
+            f"WHERE Field2__c = '{month_str}' "
+            f"AND Field128__c IN ('{ids_str}')"
+        )
+
+        for r in work_result["records"]:
+            staff_id = r.get("Field128__c")
+            staff_name = _normalize_name(hr_map.get(staff_id, r.get("Name", "不明")))
+
+            if staff_name not in staff_data:
+                staff_data[staff_name] = {
+                    "担当者": staff_name,
+                    "予定時間": 0,
+                    "稼働日数": 0,
+                    "実績時間": 0,
+                    "日別稼働": {},
+                }
+
+            staff_data[staff_name]["予定時間"] += (r.get("Field160__c") or 0)
+
+            for i in range(31):
+                day_num = i + 1
+                try:
+                    d = date(yr, mo, day_num)
+                except ValueError:
+                    continue
+                if d < start_date or d > end_date:
+                    continue
+
+                val = r.get(f"Field{129 + i}__c")
+                if val:
+                    try:
+                        parts = val.replace(".000Z", "").split(":")
+                        hours = int(parts[0]) + int(parts[1]) / 60
+                        staff_data[staff_name]["日別稼働"][d] = round(hours, 2)
+                        staff_data[staff_name]["実績時間"] += hours
+                        staff_data[staff_name]["稼働日数"] += 1
+                        daily_counts[d] += 1
+                    except (ValueError, IndexError):
+                        pass
 
     rows = []
-    daily_counts = defaultdict(int)
-    for r in work_result["records"]:
-        staff_id = r.get("Field128__c")
-        staff_name = hr_map.get(staff_id, r.get("Name", "不明"))
-        work_days = r.get("Field164__c") or 0
-        scheduled = r.get("Field160__c") or 0
-        actual = r.get("Field161__c") or 0
-
-        daily_hours = {}
-        for i in range(31):
-            val = r.get(f"Field{129 + i}__c")
-            if val:
-                try:
-                    parts = val.replace(".000Z", "").split(":")
-                    hours = int(parts[0]) + int(parts[1]) / 60
-                    daily_hours[i + 1] = round(hours, 2)
-                    daily_counts[i + 1] += 1
-                except (ValueError, IndexError):
-                    pass
-
-        rows.append({
-            "担当者": staff_name,
-            "稼働日数": work_days,
-            "予定時間": scheduled,
-            "実績時間": actual,
-            "日別稼働": daily_hours,
-        })
+    for data in staff_data.values():
+        data["実績時間"] = round(data["実績時間"], 1)
+        rows.append(data)
 
     df = pd.DataFrame(rows)
     if not df.empty:
