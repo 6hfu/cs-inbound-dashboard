@@ -686,15 +686,42 @@ with tab_improve:
             # 危険日アラート
             danger_days = merged[merged["判定"].isin(["🔴 危険", "🟡 注意"])]
             if not danger_days.empty:
-                st.error(f"受電率90%未満の日が **{len(danger_days)}日** あります")
-                for _, row in danger_days.iterrows():
-                    icon = "🔴" if row["判定"] == "🔴 危険" else "🟡"
-                    st.markdown(
-                        f"**{icon} {row['日付_str']}** — 受電率 {row['受電率']:.1f}% / "
-                        f"出勤{row['出勤者数']:.0f}名 / 取りこぼし{row['取りこぼし']}件"
+                danger_count = len(danger_days[danger_days["判定"] == "🔴 危険"])
+                warn_count = len(danger_days[danger_days["判定"] == "🟡 注意"])
+                total_missed_danger = int(danger_days["取りこぼし"].sum())
+                parts = []
+                if danger_count > 0:
+                    parts.append(f"🔴 危険 **{danger_count}日**")
+                if warn_count > 0:
+                    parts.append(f"🟡 注意 **{warn_count}日**")
+                st.error(f"受電率90%未満の日が **{len(danger_days)}日**（{' / '.join(parts)}）── 取りこぼし計 **{total_missed_danger}件**")
+
+                # 2列で要注意日カードを表示
+                cols = st.columns(2)
+                for i, (_, row) in enumerate(danger_days.iterrows()):
+                    is_danger = row["判定"] == "🔴 危険"
+                    border_color = "#EF5350" if is_danger else "#FFA726"
+                    bg_color = "#FFF5F5" if is_danger else "#FFFBF0"
+                    icon = "🔴" if is_danger else "🟡"
+                    causes_html = "".join(
+                        f"<div style='margin:2px 0;color:#555;font-size:0.85em;'>→ {c}</div>"
+                        for c in row["原因"]
                     )
-                    for cause in row["原因"]:
-                        st.markdown(f"　　→ {cause}")
+                    card_html = f"""
+                    <div style="border-left:4px solid {border_color};background:{bg_color};
+                                padding:10px 14px;border-radius:6px;margin-bottom:8px;">
+                        <div style="font-weight:bold;font-size:1.05em;margin-bottom:4px;">
+                            {icon} {row['日付_str']}
+                        </div>
+                        <div style="display:flex;gap:16px;font-size:0.9em;margin-bottom:6px;">
+                            <span>受電率 <b>{row['受電率']:.1f}%</b></span>
+                            <span>出勤 <b>{row['出勤者数']:.0f}名</b></span>
+                            <span>取りこぼし <b>{row['取りこぼし']:.0f}件</b></span>
+                        </div>
+                        {causes_html}
+                    </div>
+                    """
+                    cols[i % 2].markdown(card_html, unsafe_allow_html=True)
             else:
                 st.success("全日 受電率90%以上で問題なし")
 
