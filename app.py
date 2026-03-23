@@ -477,7 +477,31 @@ with tab_improve:
 
         future_shifts = _load_future_shifts(tomorrow, future_end, tuple(sorted(group_member_names)))
 
-        if future_shifts and weekday_stats:
+        if future_shifts and weekday_stats and past_daily_counts:
+            # 過去データから「一人あたり入電数 → 受電率」の関係を学習
+            past_merged = daily_df[["日付", "曜日", "入電数", "受電率"]].copy()
+            past_merged["日付_date"] = past_merged["日付"].dt.date
+            past_dc = pd.DataFrame([{"日付_date": d, "出勤者数": c} for d, c in past_daily_counts.items()])
+            past_merged = pd.merge(past_merged, past_dc, on="日付_date", how="inner")
+            past_merged["一人あたり入電数"] = past_merged["入電数"] / past_merged["出勤者数"]
+
+            # 一人あたり入電数の水準別に平均受電率を把握
+            avg_per_person_all = past_merged["一人あたり入電数"].mean()
+
+            def estimate_rate(per_person):
+                """過去データの類似条件から受電率を推定"""
+                if past_merged.empty:
+                    return 90.0
+                # 近い一人あたり入電数の日（±20%）の受電率平均
+                similar = past_merged[
+                    (past_merged["一人あたり入電数"] >= per_person * 0.8) &
+                    (past_merged["一人あたり入電数"] <= per_person * 1.2)
+                ]
+                if len(similar) >= 3:
+                    return similar["受電率"].mean()
+                # データ不足時は曜日平均にフォールバック
+                return past_merged["受電率"].mean()
+
             forecast_rows = []
             for d, shift_info in future_shifts.items():
                 dow = days_jp[d.weekday()]
@@ -487,21 +511,30 @@ with tab_improve:
                 expected_calls = weekday_stats[dow]["平均入電数"]
                 staff_count = shift_info["出勤予定数"]
                 hours_total = shift_info["稼働時間予定"]
-                expected_per_person = expected_calls / staff_count if staff_count > 0 else 999
 
-                # リスク判定と原因分析
+                if staff_count == 0:
+                    continue
+
+                per_person = expected_calls / staff_count
+                estimated_rate = estimate_rate(per_person)
+
+                # 原因分析
                 risks = []
-                if staff_count < avg_past_staff * 0.85:
-                    risks.append(f"出勤者少なめ（{staff_count}名、過去平均{avg_past_staff:.0f}名）")
-                if hours_total < avg_past_hours * 0.85:
-                    risks.append(f"稼働時間少なめ（{hours_total:.1f}h、過去平均{avg_past_hours:.0f}h）")
-                if expected_calls > daily_df["入電数"].mean() * 1.15:
-                    risks.append(f"{dow}曜は入電が多い傾向（予想{expected_calls:.0f}件）")
-                if weekday_stats[dow]["平均受電率"] < 90:
-                    risks.append(f"{dow}曜は受電率が低い傾向（過去平均{weekday_stats[dow]['平均受電率']:.1f}%）")
+                if estimated_rate < 90:
+                    if staff_count < avg_past_staff * 0.85:
+                        risks.append(f"出勤者が少ない（{staff_count}名、過去平均{avg_past_staff:.0f}名）")
+                    if per_person > avg_per_person_all * 1.15:
+                        risks.append(f"一人あたり負荷が高い（{per_person:.1f}件、過去平均{avg_per_person_all:.1f}件）")
+                    if expected_calls > daily_df["入電数"].mean() * 1.15:
+                        risks.append(f"{dow}曜は入電が多い（予想{expected_calls:.0f}件）")
+                    if not risks:
+                        risks.append(f"入電数に対して人員が不足気味")
 
-                if risks:
-                    risk_level = "🔴 要注意" if len(risks) >= 2 else "🟡 注意"
+                # 判定
+                if estimated_rate < 80:
+                    risk_level = "🔴 要注意"
+                elif estimated_rate < 90:
+                    risk_level = "🟡 注意"
                 else:
                     risk_level = "🟢 問題なし"
 
@@ -509,20 +542,25 @@ with tab_improve:
                     "日付": d.strftime("%m/%d") + f"({dow})",
                     "予想入電数": f"{expected_calls:.0f}件",
                     "出勤予定": f"{staff_count}名",
-                    "稼働時間予定": f"{hours_total:.1f}h",
+                    "一人あたり": f"{per_person:.1f}件",
+                    "予想受電率": f"{estimated_rate:.1f}%",
                     "判定": risk_level,
                     "risks": risks,
+                    "_rate": estimated_rate,
                 })
 
-            # 注意日だけ先に表示
-            alert_rows = [r for r in forecast_rows if r["判定"] != "🟢 問題なし"]
+            # 注意日だけ先に表示（予想受電率が低い順）
+            alert_rows = sorted(
+                [r for r in forecast_rows if r["判定"] != "🟢 問題なし"],
+                key=lambda r: r["_rate"]
+            )
             if alert_rows:
-                st.warning(f"今後 **{len(alert_rows)}日** に注意が必要です")
+                st.warning(f"受電率が落ち込みそうな日が **{len(alert_rows)}日** あります")
                 for r in alert_rows:
                     icon = "🔴" if "要注意" in r["判定"] else "🟡"
                     st.markdown(
-                        f"**{icon} {r['日付']}** — 予想入電{r['予想入電数']} / "
-                        f"出勤予定{r['出勤予定']} / 稼働{r['稼働時間予定']}"
+                        f"**{icon} {r['日付']}** — 予想受電率 **{r['予想受電率']}** "
+                        f"（予想入電{r['予想入電数']} ÷ 出勤{r['出勤予定']} = 一人あたり{r['一人あたり']}）"
                     )
                     for risk in r["risks"]:
                         st.markdown(f"　　→ {risk}")
@@ -530,7 +568,7 @@ with tab_improve:
                 st.success("今後のシフトに大きな問題は見られません")
 
             # 全日一覧テーブル
-            forecast_df = pd.DataFrame(forecast_rows)[["判定", "日付", "予想入電数", "出勤予定", "稼働時間予定"]]
+            forecast_df = pd.DataFrame(forecast_rows)[["判定", "日付", "予想入電数", "出勤予定", "一人あたり", "予想受電率"]]
             st.dataframe(forecast_df, use_container_width=True, hide_index=True)
         else:
             st.info("今後のシフトデータが登録されていないか、過去データが不足しています")
