@@ -428,11 +428,11 @@ with tab_shift_table:
         groups = st.session_state.groups
         group_names = list(groups.keys())
 
-        # グループ色の定義
+        # グループ色の定義（淡め）
         GROUP_COLORS = {
             group_names[i] if i < len(group_names) else "": c
-            for i, c in enumerate(["#1976D2", "#7B1FA2", "#388E3C", "#E64A19", "#00838F",
-                                    "#C62828", "#4527A0", "#2E7D32"])
+            for i, c in enumerate(["#5C9BD5", "#9B7FC4", "#6BAF6E", "#E08850", "#5BAAB5",
+                                    "#D47070", "#7E6BAD", "#5DA06A"])
         }
 
         col_view, col_group, col_spacer = st.columns([1, 1.5, 3])
@@ -495,14 +495,14 @@ with tab_shift_table:
                     .shift-table .group-header { font-weight: bold; font-size: 0.95em; padding: 6px 10px;
                                                   text-align: left; color: white; }
                     .shift-table .summary-row td { font-weight: bold; background: #f0f0f0; border-top: 2px solid #999; }
-                    .shift-table .sat { background: #E3F2FD; }
-                    .shift-table .sun { background: #FFEBEE; }
-                    .shift-table .total-col { background: #FAFAFA; font-weight: bold; min-width: 45px; }
+                    .shift-table .sat { background: #F0F6FF; }
+                    .shift-table .sun { background: #FFF5F5; }
+                    .shift-table .total-col { background: #FAFAFA; font-weight: 600; min-width: 45px; }
                     .cell-work { border-radius: 4px; padding: 2px 0; }
-                    .cell-8h { background: #C8E6C9; color: #1B5E20; font-weight: bold; }
-                    .cell-5h { background: #E1BEE7; color: #4A148C; }
-                    .cell-short { background: #FFF9C4; color: #F57F17; }
-                    .cell-off { color: #ccc; }
+                    .cell-8h { background: #E8F5E9; color: #2E7D32; }
+                    .cell-5h { background: #F3E8FF; color: #6B4D8A; }
+                    .cell-short { background: #FFFDE7; color: #A68200; }
+                    .cell-off { color: #d5d5d5; }
                     </style>
                     """
 
