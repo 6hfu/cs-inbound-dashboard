@@ -549,11 +549,8 @@ with tab_improve:
                     "_rate": estimated_rate,
                 })
 
-            # 注意日だけ先に表示（予想受電率が低い順）
-            alert_rows = sorted(
-                [r for r in forecast_rows if r["判定"] != "🟢 問題なし"],
-                key=lambda r: r["_rate"]
-            )
+            # 注意日だけ先に表示（日付順）
+            alert_rows = [r for r in forecast_rows if r["判定"] != "🟢 問題なし"]
             if alert_rows:
                 st.warning(f"受電率が落ち込みそうな日が **{len(alert_rows)}日** あります")
                 for r in alert_rows:
