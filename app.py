@@ -486,20 +486,21 @@ with tab_shift_table:
                     # HTMLテーブル構築
                     html = """
                     <style>
-                    .shift-table { border-collapse: collapse; width: 100%; font-size: 0.82em; }
-                    .shift-table th { padding: 6px 4px; text-align: center; border: 1px solid #ddd;
+                    .shift-table { border-collapse: collapse; width: 100%; font-size: 0.95em; }
+                    .shift-table th { padding: 8px 6px; text-align: center; border: 1px solid #ddd;
                                       background: #f8f9fa; position: sticky; top: 0; z-index: 1; }
-                    .shift-table td { padding: 5px 4px; text-align: center; border: 1px solid #e0e0e0; }
-                    .shift-table .name-cell { text-align: left; padding-left: 10px; white-space: nowrap;
-                                               font-weight: 500; min-width: 90px; }
-                    .shift-table .group-header { font-weight: bold; font-size: 0.95em; padding: 6px 10px;
+                    .shift-table td { padding: 8px 6px; text-align: center; border: 1px solid #e0e0e0;
+                                      font-size: 0.95em; }
+                    .shift-table .name-cell { text-align: left; padding-left: 12px; white-space: nowrap;
+                                               font-weight: 500; min-width: 100px; }
+                    .shift-table .group-header { font-weight: bold; font-size: 0.95em; padding: 8px 12px;
                                                   text-align: left; color: white; }
                     .shift-table .summary-row td { font-weight: bold; background: #f0f0f0; border-top: 2px solid #999; }
                     .shift-table .sat { background: #F0F6FF; }
                     .shift-table .sun { background: #FFF5F5; }
-                    .shift-table .total-col { background: #FAFAFA; font-weight: 600; min-width: 45px; }
-                    .cell-work { border-radius: 4px; padding: 2px 0; }
-                    .cell-8h { background: #E8F5E9; color: #2E7D32; }
+                    .shift-table .total-col { background: #FAFAFA; font-weight: 600; min-width: 50px; }
+                    .cell-work { border-radius: 4px; padding: 3px 6px; display: inline-block; min-width: 32px; }
+                    .cell-8h { background: #E8F5E9; color: #2E7D32; font-weight: 600; }
                     .cell-5h { background: #F3E8FF; color: #6B4D8A; }
                     .cell-short { background: #FFFDE7; color: #A68200; }
                     .cell-off { color: #d5d5d5; }
