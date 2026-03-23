@@ -18,6 +18,7 @@ from salesforce_client import (
     aggregate_call_results,
     fetch_shift_data,
     fetch_future_shift_counts,
+    fetch_shift_by_members,
     fetch_all_cs_staff,
     load_groups,
     save_groups,
@@ -449,7 +450,12 @@ with tab_shift_table:
         else:
             member_names = set(groups.get(selected_group, []))
 
-        target_shifts = shift_df[shift_df["担当者"].isin(member_names)]
+        # Task実績に依存せずグループメンバーのシフトを直接取得
+        @st.cache_data(ttl=21600)
+        def _load_member_shifts(s, e, members_tuple):
+            return fetch_shift_by_members(s, e, set(members_tuple))
+
+        target_shifts = _load_member_shifts(start_date, end_date, tuple(sorted(member_names)))
 
         if not target_shifts.empty:
             all_dates = set()

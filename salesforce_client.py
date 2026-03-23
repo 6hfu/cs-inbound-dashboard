@@ -478,3 +478,80 @@ def fetch_future_shift_counts(start_date, end_date, group_members=None):
 
     return {d: {"出勤予定数": daily_counts[d], "稼働時間予定": round(daily_hours[d], 1)}
             for d in sorted(daily_counts.keys())}
+
+
+def fetch_shift_by_members(start_date, end_date, member_names):
+    """指定メンバーのシフトデータを取得（Task実績不要、シフト表用）"""
+    sf = get_sf()
+
+    hr_result = sf.query_all(
+        "SELECT Id, Name FROM CustomObject10__c WHERE Field39__c = 'CS'"
+    )
+    hr_map = {}
+    for r in hr_result["records"]:
+        name = _normalize_name(r["Name"])
+        if name in member_names:
+            hr_map[r["Id"]] = name
+    if not hr_map:
+        return pd.DataFrame()
+
+    ids_str = "','".join(hr_map.keys())
+    day_fields = ", ".join([f"Field{129 + i}__c" for i in range(31)])
+
+    staff_data = {}
+    daily_counts = defaultdict(int)
+
+    for yr, mo in _months_in_range(start_date, end_date):
+        month_str = f"{mo}月"
+        work_result = sf.query_all(
+            f"SELECT Field128__c, Field160__c, {day_fields} "
+            f"FROM CustomObject11__c "
+            f"WHERE Field2__c = '{month_str}' "
+            f"AND Field128__c IN ('{ids_str}')"
+        )
+
+        for r in work_result["records"]:
+            staff_id = r.get("Field128__c")
+            staff_name = hr_map.get(staff_id, "不明")
+
+            if staff_name not in staff_data:
+                staff_data[staff_name] = {
+                    "担当者": staff_name,
+                    "予定時間": 0,
+                    "稼働日数": 0,
+                    "実績時間": 0,
+                    "日別稼働": {},
+                }
+
+            staff_data[staff_name]["予定時間"] += (r.get("Field160__c") or 0)
+
+            for i in range(31):
+                day_num = i + 1
+                try:
+                    d = date(yr, mo, day_num)
+                except ValueError:
+                    continue
+                if d < start_date or d > end_date:
+                    continue
+
+                val = r.get(f"Field{129 + i}__c")
+                if val:
+                    try:
+                        parts = val.replace(".000Z", "").split(":")
+                        hours = int(parts[0]) + int(parts[1]) / 60
+                        staff_data[staff_name]["日別稼働"][d] = round(hours, 2)
+                        staff_data[staff_name]["実績時間"] += hours
+                        staff_data[staff_name]["稼働日数"] += 1
+                        daily_counts[d] += 1
+                    except (ValueError, IndexError):
+                        pass
+
+    rows = []
+    for data in staff_data.values():
+        data["実績時間"] = round(data["実績時間"], 1)
+        rows.append(data)
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df.attrs["daily_staff_count"] = dict(daily_counts)
+    return df
