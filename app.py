@@ -239,7 +239,7 @@ with tab_rate:
             yaxis2=dict(title="入電数", overlaying="y", side="right"),
             legend=dict(x=0, y=1.1, orientation="h"),
         )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+        st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
         # ヒートマップ & 時間帯別平均受電率
         col1, col2 = st.columns(2)
@@ -265,7 +265,7 @@ with tab_rate:
                                    color_continuous_scale=custom_scale, aspect="auto",
                                    zmin=0, zmax=100,
                                    labels=dict(color="受電率(%)"))
-                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+                    st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
         with col2:
             if not hourly_df.empty:
@@ -279,7 +279,7 @@ with tab_rate:
                                  color="平均受電率", color_continuous_scale="RdYlGn", text="平均受電率")
                     fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
                     fig.update_yaxes(range=[0, 100])
-                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+                    st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
         # 日別データ一覧
         st.subheader("日別データ一覧")
@@ -327,13 +327,13 @@ with tab_results:
             fig = px.bar(group_summary, x="グループ", y="受電数", title="グループ別 受電数",
                          color="受電数", color_continuous_scale="Blues", text="受電数")
             fig.update_traces(textposition="outside")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+            st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
         with col2:
             fig = px.bar(group_summary, x="グループ", y="完了率", title="グループ別 完了率",
                          color="完了率", color_continuous_scale="Greens", text="完了率")
             fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
             fig.update_yaxes(range=[0, 100])
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+            st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
         gs_display = group_summary.copy()
         gs_display["完了率"] = gs_display["完了率"].apply(lambda x: f"{x:.1f}%")
@@ -356,7 +356,7 @@ with tab_results:
             )
             fig.update_traces(textposition="outside")
             fig.update_layout(height=max(400, len(filtered) * 30))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+            st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
         with col2:
             fig = px.bar(
                 filtered.sort_values("完了率", ascending=True),
@@ -365,7 +365,7 @@ with tab_results:
             )
             fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
             fig.update_layout(height=max(400, len(filtered) * 30))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+            st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
         # テーブル
         table_cols = ["グループ", "担当者", "受電数", "完了", "完了率"] + [
@@ -394,7 +394,7 @@ with tab_shift:
             fig = px.bar(dc_df, x="日付", y="出勤者数", title="日別 出勤者数",
                          color="出勤者数", color_continuous_scale="Purples", text="出勤者数")
             fig.update_traces(textposition="outside")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+            st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
         col1, col2 = st.columns(2)
         with col1:
@@ -402,7 +402,7 @@ with tab_shift:
             fig = px.bar(s, x="稼働日数", y="担当者", title="担当者別 稼働日数",
                          orientation="h", color="稼働日数", color_continuous_scale="Purples")
             fig.update_layout(height=max(400, len(s) * 25))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+            st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
         with col2:
             s = shift_df.sort_values("実績時間", ascending=True)
             fig = go.Figure()
@@ -412,7 +412,7 @@ with tab_shift:
                                  orientation="h", marker_color="#1565C0"))
             fig.update_layout(title="予定時間 vs 実績時間", barmode="overlay",
                               height=max(400, len(s) * 25))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+            st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
         st.subheader("稼働実績一覧")
         ds = shift_df[["担当者", "稼働日数", "予定時間", "実績時間"]].sort_values("実績時間", ascending=False)
@@ -513,7 +513,7 @@ with tab_improve:
                 legend=dict(x=0, y=1.15, orientation="h"),
                 height=450, xaxis=dict(tickangle=45),
             )
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "dragMode": False})
+            st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
             # 受電率90%以上 vs 未満の比較
             good = merged[merged["受電率"] >= 90]
