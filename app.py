@@ -199,7 +199,9 @@ with st.spinner("Salesforceからデータ取得中..."):
 if "groups" not in st.session_state:
     _saved = load_groups()
     st.session_state.groups = {k: v for k, v in _saved.items() if not k.startswith("_")}
-    st.session_state.headcount_exclude = set(_saved.get("_headcount_exclude", []))
+if "headcount_exclude" not in st.session_state:
+    _saved_hc = load_groups()
+    st.session_state.headcount_exclude = set(_saved_hc.get("_headcount_exclude", []))
 
 
 def get_headcount_members(groups, exclude_set):
