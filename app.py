@@ -465,11 +465,17 @@ with tab_improve:
                           _month_end(today.year + (1 if today.month == 12 else 0),
                                      1 if today.month == 12 else today.month + 1).day)
 
-        @st.cache_data(ttl=21600)
-        def _load_future_shifts(s, e):
-            return fetch_future_shift_counts(s, e)
+        # グループ所属メンバーだけで集計
+        groups = st.session_state.groups
+        group_member_names = set()
+        for members in groups.values():
+            group_member_names.update(members)
 
-        future_shifts = _load_future_shifts(tomorrow, future_end)
+        @st.cache_data(ttl=21600)
+        def _load_future_shifts(s, e, members_tuple):
+            return fetch_future_shift_counts(s, e, group_members=set(members_tuple))
+
+        future_shifts = _load_future_shifts(tomorrow, future_end, tuple(sorted(group_member_names)))
 
         if future_shifts and weekday_stats:
             forecast_rows = []

@@ -426,14 +426,19 @@ def fetch_shift_data(start_date, end_date):
     return df
 
 
-def fetch_future_shift_counts(start_date, end_date):
-    """指定期間の日別出勤予定者数・稼働時間予定を取得（CS全スタッフ対象）"""
+def fetch_future_shift_counts(start_date, end_date, group_members=None):
+    """指定期間の日別出勤予定者数・稼働時間予定を取得
+
+    group_members: グループに所属するメンバー名のセット（指定時はその人だけ集計）
+    """
     sf = get_sf()
 
     hr_result = sf.query_all(
         "SELECT Id, Name FROM CustomObject10__c WHERE Field39__c = 'CS'"
     )
     hr_map = {r["Id"]: _normalize_name(r["Name"]) for r in hr_result["records"]}
+    if group_members:
+        hr_map = {k: v for k, v in hr_map.items() if v in group_members}
     if not hr_map:
         return {}
 
