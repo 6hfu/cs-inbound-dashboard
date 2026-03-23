@@ -202,8 +202,8 @@ def get_group_for(name, groups):
     return "未割当"
 
 
-tab_rate, tab_results, tab_shift, tab_improve, tab_groups = st.tabs([
-    "📈 受電率", "📊 コール処理実績", "🕐 稼働実績", "🎯 改善分析", "⚙️ グループ設定"
+tab_rate, tab_results, tab_shift, tab_shift_table, tab_improve, tab_groups = st.tabs([
+    "📈 受電率", "📊 コール処理実績", "🕐 稼働実績", "📅 シフト表", "🎯 改善分析", "⚙️ グループ設定"
 ])
 
 
@@ -419,14 +419,23 @@ with tab_shift:
         ds = shift_df[["担当者", "稼働日数", "予定時間", "実績時間"]].sort_values("実績時間", ascending=False)
         st.dataframe(ds, use_container_width=True, hide_index=True)
 
-        # --- グループ別シフト表 ---
-        st.markdown("---")
-        st.subheader("グループ別シフト表")
 
+# ----- タブ4: シフト表 -----
+with tab_shift_table:
+    if shift_df.empty:
+        st.warning("該当期間のシフトデータがありません")
+    else:
         groups = st.session_state.groups
         group_names = list(groups.keys())
 
-        col_view, col_group = st.columns([1, 2])
+        # グループ色の定義
+        GROUP_COLORS = {
+            group_names[i] if i < len(group_names) else "": c
+            for i, c in enumerate(["#1976D2", "#7B1FA2", "#388E3C", "#E64A19", "#00838F",
+                                    "#C62828", "#4527A0", "#2E7D32"])
+        }
+
+        col_view, col_group, col_spacer = st.columns([1, 1.5, 3])
         with col_view:
             shift_view = st.radio("表示単位", ["月間", "週間"], horizontal=True, key="shift_view")
         with col_group:
@@ -443,7 +452,6 @@ with tab_shift:
         target_shifts = shift_df[shift_df["担当者"].isin(member_names)]
 
         if not target_shifts.empty:
-            # 全日付を収集
             all_dates = set()
             for _, row in target_shifts.iterrows():
                 all_dates.update(row["日別稼働"].keys())
@@ -452,12 +460,9 @@ with tab_shift:
                 all_dates_sorted = sorted(all_dates)
                 days_jp = ["月", "火", "水", "木", "金", "土", "日"]
 
-                # 週間表示の場合、週を選択
                 if shift_view == "週間":
-                    # 週の開始日（月曜）リストを作成
                     weeks = sorted(set(d - timedelta(days=d.weekday()) for d in all_dates_sorted))
                     week_labels = [f"{w.strftime('%m/%d')}〜{(w + timedelta(days=6)).strftime('%m/%d')}" for w in weeks]
-                    # デフォルトで最新の週を選択
                     selected_week_idx = st.selectbox(
                         "週を選択", range(len(week_labels)),
                         format_func=lambda i: week_labels[i],
@@ -470,98 +475,130 @@ with tab_shift:
                     display_dates = all_dates_sorted
 
                 if display_dates:
-                    # 日付列ヘッダー
-                    date_cols = [f"{d.strftime('%m/%d')}\n({days_jp[d.weekday()]})" for d in display_dates]
+                    # グループ別にメンバーを整理
+                    members_by_group = {}
+                    for g in group_names:
+                        g_members = set(groups[g])
+                        g_shifts = target_shifts[target_shifts["担当者"].isin(g_members)]
+                        if not g_shifts.empty:
+                            members_by_group[g] = g_shifts.sort_values("担当者")
 
-                    # メンバー × 日付のマトリクスを作成
-                    matrix_rows = []
-                    for _, row in target_shifts.sort_values("担当者").iterrows():
-                        name = row["担当者"]
-                        grp = "未割当"
-                        for g, members in groups.items():
-                            if name in members:
-                                grp = g
-                                break
-                        r = {"グループ": grp, "担当者": name}
-                        total_h = 0
-                        for d in display_dates:
-                            h = row["日別稼働"].get(d, 0)
-                            r[f"{d.strftime('%m/%d')}\n({days_jp[d.weekday()]})"] = round(h, 1) if h > 0 else None
-                            total_h += h
-                        r["合計"] = round(total_h, 1)
-                        r["日数"] = sum(1 for d in display_dates if row["日別稼働"].get(d, 0) > 0)
-                        matrix_rows.append(r)
+                    # HTMLテーブル構築
+                    html = """
+                    <style>
+                    .shift-table { border-collapse: collapse; width: 100%; font-size: 0.82em; }
+                    .shift-table th { padding: 6px 4px; text-align: center; border: 1px solid #ddd;
+                                      background: #f8f9fa; position: sticky; top: 0; z-index: 1; }
+                    .shift-table td { padding: 5px 4px; text-align: center; border: 1px solid #e0e0e0; }
+                    .shift-table .name-cell { text-align: left; padding-left: 10px; white-space: nowrap;
+                                               font-weight: 500; min-width: 90px; }
+                    .shift-table .group-header { font-weight: bold; font-size: 0.95em; padding: 6px 10px;
+                                                  text-align: left; color: white; }
+                    .shift-table .summary-row td { font-weight: bold; background: #f0f0f0; border-top: 2px solid #999; }
+                    .shift-table .sat { background: #E3F2FD; }
+                    .shift-table .sun { background: #FFEBEE; }
+                    .shift-table .total-col { background: #FAFAFA; font-weight: bold; min-width: 45px; }
+                    .cell-work { border-radius: 4px; padding: 2px 0; }
+                    .cell-8h { background: #C8E6C9; color: #1B5E20; font-weight: bold; }
+                    .cell-5h { background: #E1BEE7; color: #4A148C; }
+                    .cell-short { background: #FFF9C4; color: #F57F17; }
+                    .cell-off { color: #ccc; }
+                    </style>
+                    """
 
-                    matrix_df = pd.DataFrame(matrix_rows)
-                    # グループ順にソート
-                    group_order = {g: i for i, g in enumerate(group_names)}
-                    matrix_df["_sort"] = matrix_df["グループ"].map(group_order).fillna(99)
-                    matrix_df = matrix_df.sort_values(["_sort", "グループ", "担当者"]).drop(columns="_sort")
-
-                    # 日別の出勤者数・合計時間の集計行
-                    summary_count = {"グループ": "", "担当者": "出勤者数"}
-                    summary_hours = {"グループ": "", "担当者": "合計時間(h)"}
+                    # ヘッダー行
+                    html += '<div style="overflow-x: auto;"><table class="shift-table">'
+                    html += "<thead><tr><th style='min-width:90px;'>担当者</th>"
                     for d in display_dates:
-                        col_name = f"{d.strftime('%m/%d')}\n({days_jp[d.weekday()]})"
-                        count = sum(1 for _, row in target_shifts.iterrows() if row["日別稼働"].get(d, 0) > 0)
-                        hours = sum(row["日別稼働"].get(d, 0) for _, row in target_shifts.iterrows())
-                        summary_count[col_name] = count
-                        summary_hours[col_name] = round(hours, 1)
-                    summary_count["合計"] = ""
-                    summary_count["日数"] = ""
-                    summary_hours["合計"] = ""
-                    summary_hours["日数"] = ""
+                        dow = d.weekday()
+                        dow_class = "sat" if dow == 5 else ("sun" if dow == 6 else "")
+                        day_label = days_jp[dow]
+                        html += f"<th class='{dow_class}'>{d.strftime('%m/%d')}<br><small>{day_label}</small></th>"
+                    html += "<th class='total-col'>合計</th><th class='total-col'>日数</th></tr></thead>"
+                    html += "<tbody>"
 
-                    # スタイル関数
-                    def style_shift(val):
-                        if val is None or val == "" or val == 0:
-                            return "background-color: #f5f5f5; color: #ccc;"
-                        if isinstance(val, (int, float)) and val > 0:
-                            if val >= 8:
-                                return "background-color: #E3F2FD; font-weight: bold;"
-                            elif val >= 5:
-                                return "background-color: #F3E5F5;"
-                            else:
-                                return "background-color: #FFF8E1;"
-                        return ""
+                    # グループごとにセクション表示
+                    display_groups = [selected_group] if selected_group != "全体" else list(members_by_group.keys())
 
-                    # サマリー行を追加
-                    summary_df = pd.DataFrame([summary_count, summary_hours])
-                    display_df = pd.concat([matrix_df, summary_df], ignore_index=True)
+                    for g in display_groups:
+                        if g not in members_by_group:
+                            continue
+                        g_shifts_df = members_by_group[g]
+                        g_color = GROUP_COLORS.get(g, "#546E7A")
 
-                    # Noneを表示用に変換
-                    display_df = display_df.fillna("—")
-                    for col in date_cols:
-                        if col in display_df.columns:
-                            display_df[col] = display_df[col].apply(
-                                lambda x: "—" if x == 0 or x == 0.0 else x
-                            )
+                        # グループヘッダー行
+                        col_span = len(display_dates) + 3
+                        html += f"<tr><td colspan='{col_span}' class='group-header' "
+                        html += f"style='background:{g_color};'>{g}（{len(g_shifts_df)}名）</td></tr>"
 
-                    st.dataframe(
-                        display_df,
-                        use_container_width=True,
-                        hide_index=True,
-                        height=min(700, (len(display_df) + 1) * 38),
-                    )
+                        for _, row in g_shifts_df.iterrows():
+                            html += f"<tr><td class='name-cell'>{row['担当者']}</td>"
+                            total_h = 0
+                            work_days = 0
+                            for d in display_dates:
+                                h = row["日別稼働"].get(d, 0)
+                                dow = d.weekday()
+                                dow_class = "sat" if dow == 5 else ("sun" if dow == 6 else "")
+                                if h > 0:
+                                    total_h += h
+                                    work_days += 1
+                                    h_round = round(h, 1)
+                                    if h >= 8:
+                                        cell_class = "cell-work cell-8h"
+                                    elif h >= 5:
+                                        cell_class = "cell-work cell-5h"
+                                    else:
+                                        cell_class = "cell-work cell-short"
+                                    html += f"<td class='{dow_class}'><span class='{cell_class}'>{h_round}</span></td>"
+                                else:
+                                    html += f"<td class='{dow_class} cell-off'>—</td>"
+                            html += f"<td class='total-col'>{round(total_h, 1)}</td>"
+                            html += f"<td class='total-col'>{work_days}</td></tr>"
+
+                    # 集計行
+                    html += "<tr class='summary-row'><td class='name-cell'>出勤者数</td>"
+                    for d in display_dates:
+                        cnt = sum(1 for _, row in target_shifts.iterrows() if row["日別稼働"].get(d, 0) > 0)
+                        html += f"<td>{cnt}名</td>"
+                    html += "<td></td><td></td></tr>"
+
+                    html += "<tr class='summary-row'><td class='name-cell'>合計時間</td>"
+                    for d in display_dates:
+                        hrs = sum(row["日別稼働"].get(d, 0) for _, row in target_shifts.iterrows())
+                        html += f"<td>{round(hrs, 1)}h</td>"
+                    html += "<td></td><td></td></tr>"
+
+                    html += "</tbody></table></div>"
+
+                    # 凡例
+                    html += """
+                    <div style="margin-top:10px;display:flex;gap:16px;font-size:0.8em;color:#666;">
+                        <span><span class="cell-work cell-8h" style="padding:2px 8px;border-radius:4px;">8.0</span> 8h以上</span>
+                        <span><span class="cell-work cell-5h" style="padding:2px 8px;border-radius:4px;">6.0</span> 5〜8h</span>
+                        <span><span class="cell-work cell-short" style="padding:2px 8px;border-radius:4px;">3.0</span> 5h未満</span>
+                        <span style="color:#ccc;">— 休み</span>
+                    </div>
+                    """
+
+                    st.markdown(html, unsafe_allow_html=True)
 
                     # グループ別集計サマリー
-                    if selected_group == "全体" and len(group_names) > 1:
-                        st.markdown("**グループ別集計**")
+                    if selected_group == "全体" and len(members_by_group) > 1:
+                        st.markdown("---")
+                        st.subheader("グループ別集計")
                         group_summary_rows = []
                         for g in group_names:
-                            g_members = set(groups[g])
-                            g_shifts = target_shifts[target_shifts["担当者"].isin(g_members)]
-                            if g_shifts.empty:
+                            if g not in members_by_group:
                                 continue
-                            g_total_hours = g_shifts["実績時間"].sum()
-                            g_avg_hours = g_shifts["実績時間"].mean()
-                            g_avg_days = g_shifts["稼働日数"].mean()
-                            g_count = len(g_shifts)
+                            g_shifts_df = members_by_group[g]
+                            g_total_hours = g_shifts_df["実績時間"].sum()
+                            g_avg_hours = g_shifts_df["実績時間"].mean()
+                            g_avg_days = g_shifts_df["稼働日数"].mean()
+                            g_count = len(g_shifts_df)
 
-                            # 日別の平均出勤者数
                             day_counts = []
                             for d in display_dates:
-                                cnt = sum(1 for _, row in g_shifts.iterrows() if row["日別稼働"].get(d, 0) > 0)
+                                cnt = sum(1 for _, row in g_shifts_df.iterrows() if row["日別稼働"].get(d, 0) > 0)
                                 day_counts.append(cnt)
                             avg_daily = sum(day_counts) / len(day_counts) if day_counts else 0
 
@@ -580,7 +617,7 @@ with tab_shift:
             st.info("選択したグループのシフトデータがありません")
 
 
-# ----- タブ4: 改善分析 -----
+# ----- タブ5: 改善分析 -----
 with tab_improve:
     st.subheader("受電率の改善ポイント")
 
