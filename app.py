@@ -486,16 +486,21 @@ with tab_shift_table:
                     # HTMLテーブル構築
                     html = """
                     <style>
-                    .shift-table { border-collapse: collapse; width: 100%; font-size: 0.95em; }
+                    .shift-wrap { overflow: auto; max-height: 75vh; position: relative; }
+                    .shift-table { border-collapse: separate; border-spacing: 0; width: max-content; font-size: 0.95em; }
                     .shift-table th { padding: 8px 6px; text-align: center; border: 1px solid #ddd;
-                                      background: #f8f9fa; position: sticky; top: 0; z-index: 1; }
+                                      background: #f8f9fa; position: sticky; top: 0; z-index: 2; }
+                    .shift-table th:first-child { position: sticky; left: 0; z-index: 3; background: #f8f9fa; }
                     .shift-table td { padding: 8px 6px; text-align: center; border: 1px solid #e0e0e0;
                                       font-size: 0.95em; }
                     .shift-table .name-cell { text-align: left; padding-left: 12px; white-space: nowrap;
-                                               font-weight: 500; min-width: 100px; }
+                                               font-weight: 500; min-width: 100px; position: sticky;
+                                               left: 0; z-index: 1; background: #fff;
+                                               border-right: 2px solid #ccc; }
                     .shift-table .group-header { font-weight: bold; font-size: 0.95em; padding: 8px 12px;
-                                                  text-align: left; color: white; }
+                                                  text-align: left; color: white; position: sticky; left: 0; }
                     .shift-table .summary-row td { font-weight: bold; background: #f0f0f0; border-top: 2px solid #999; }
+                    .shift-table .summary-row .name-cell { background: #f0f0f0; }
                     .shift-table .sat { background: #F0F6FF; }
                     .shift-table .sun { background: #FFF5F5; }
                     .shift-table .total-col { background: #FAFAFA; font-weight: 600; min-width: 50px; }
@@ -508,7 +513,7 @@ with tab_shift_table:
                     """
 
                     # ヘッダー行
-                    html += '<div style="overflow-x: auto;"><table class="shift-table">'
+                    html += '<div class="shift-wrap"><table class="shift-table">'
                     html += "<thead><tr><th style='min-width:90px;'>担当者</th>"
                     for d in display_dates:
                         dow = d.weekday()
