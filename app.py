@@ -5,6 +5,7 @@
 """
 
 import json
+from collections import defaultdict
 from datetime import date, timedelta
 import streamlit as st
 import pandas as pd
@@ -13,7 +14,8 @@ import plotly.graph_objects as go
 from salesforce_client import (
     fetch_daily_call_rate,
     fetch_hourly_call_rate,
-    fetch_call_results,
+    fetch_call_results_raw,
+    aggregate_call_results,
     fetch_shift_data,
     fetch_all_cs_staff,
     load_groups,
@@ -66,13 +68,115 @@ else:
 st.caption(f"{start_date.strftime('%Y/%m/%d')} 〜 {end_date.strftime('%Y/%m/%d')} ｜ 営業時間 10:00-19:00 ｜ データソース: Salesforce")
 
 
+def _month_end(year, month):
+    if month == 12:
+        return date(year, 12, 31)
+    return date(year, month + 1, 1) - timedelta(days=1)
+
+
+def _months_covering(start_date, end_date):
+    """日付範囲をカバーする(year, month)リスト"""
+    months = []
+    d = start_date.replace(day=1)
+    while d <= end_date:
+        months.append((d.year, d.month))
+        if d.month == 12:
+            d = date(d.year + 1, 1, 1)
+        else:
+            d = date(d.year, d.month + 1, 1)
+    return months
+
+
 @st.cache_data(ttl=1800)
-def load_data(s, e):
-    daily_df = fetch_daily_call_rate(s, e)
-    hourly_df = fetch_hourly_call_rate(s, e)
-    results_df, result_labels = fetch_call_results(s, e)
-    shift_df = fetch_shift_data(s, e)
+def _load_month(year, month):
+    """月単位でSalesforceからデータ取得（キャッシュ単位）"""
+    s = date(year, month, 1)
+    e = _month_end(year, month)
+    daily = fetch_daily_call_rate(s, e)
+    hourly = fetch_hourly_call_rate(s, e)
+    results_raw, result_labels = fetch_call_results_raw(s, e)
+    shift = fetch_shift_data(s, e)
+    return daily, hourly, results_raw, result_labels, shift
+
+
+def _filter_date(df, col, start_date, end_date):
+    """DataFrameの日付列でフィルター"""
+    if df.empty:
+        return df
+    mask = (df[col].dt.date >= start_date) & (df[col].dt.date <= end_date)
+    return df[mask].reset_index(drop=True)
+
+
+def _combine_and_filter_shifts(shifts, start_date, end_date):
+    """複数月の稼働実績を統合し日付範囲でフィルター"""
+    staff = {}
+    daily_counts = defaultdict(int)
+
+    for sdf in shifts:
+        if sdf.empty:
+            continue
+        for _, row in sdf.iterrows():
+            name = row["担当者"]
+            if name not in staff:
+                staff[name] = {"担当者": name, "予定時間": 0, "日別稼働": {}}
+            staff[name]["予定時間"] += row["予定時間"]
+            for d, h in row["日別稼働"].items():
+                if start_date <= d <= end_date:
+                    staff[name]["日別稼働"][d] = h
+
+    rows = []
+    for data in staff.values():
+        hours = data["日別稼働"]
+        if not hours:
+            continue
+        rows.append({
+            "担当者": data["担当者"],
+            "予定時間": data["予定時間"],
+            "稼働日数": len(hours),
+            "実績時間": round(sum(hours.values()), 1),
+            "日別稼働": hours,
+        })
+        for d in hours:
+            daily_counts[d] += 1
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df.attrs["daily_staff_count"] = dict(daily_counts)
+    return df
+
+
+def load_data(start_date, end_date):
+    """月単位キャッシュからデータを取得し、日付範囲でフィルター"""
+    months = _months_covering(start_date, end_date)
+
+    all_daily, all_hourly, all_raw, all_shifts = [], [], [], []
+    result_labels = []
+
+    for y, m in months:
+        daily, hourly, raw, labels, shift = _load_month(y, m)
+        all_daily.append(daily)
+        all_hourly.append(hourly)
+        all_raw.append(raw)
+        all_shifts.append(shift)
+        result_labels = labels
+
+    # 受電率: concat + 日付フィルター
+    daily_df = pd.concat(all_daily, ignore_index=True) if any(not d.empty for d in all_daily) else pd.DataFrame()
+    hourly_df = pd.concat(all_hourly, ignore_index=True) if any(not h.empty for h in all_hourly) else pd.DataFrame()
+    daily_df = _filter_date(daily_df, "日付", start_date, end_date)
+    hourly_df = _filter_date(hourly_df, "日付", start_date, end_date)
+
+    # コール処理: concat + 日付フィルター + 集約
+    raw_df = pd.concat(all_raw, ignore_index=True) if any(not r.empty for r in all_raw) else pd.DataFrame()
+    if not raw_df.empty:
+        raw_df = raw_df[(raw_df["日付"] >= start_date) & (raw_df["日付"] <= end_date)]
+    results_df, result_labels = aggregate_call_results(raw_df, result_labels)
+
+    # 稼働: 統合 + 日付フィルター
+    shift_df = _combine_and_filter_shifts(all_shifts, start_date, end_date)
+
     return daily_df, hourly_df, results_df, result_labels, shift_df
+
 
 with st.spinner("Salesforceからデータ取得中..."):
     daily_df, hourly_df, results_df, result_labels, shift_df = load_data(start_date, end_date)

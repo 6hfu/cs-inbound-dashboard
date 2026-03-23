@@ -224,12 +224,11 @@ RESULT_FIELD = "Field4_del__c"
 TYPE_FIELD = "Field3_del__c"
 
 
-def fetch_call_results(start_date, end_date):
-    """担当者別のコール処理結果（完了、対応依頼、キャンセル等）"""
+def fetch_call_results_raw(start_date, end_date):
+    """個別Taskレコードを日付付きで取得（集約前、キャッシュ用）"""
     sf = get_sf()
     utc_start, utc_end = _utc_range(start_date, end_date)
 
-    # 受電のピックリスト値を取得
     desc = sf.Task.describe()
     juden_val = None
     result_labels = []
@@ -250,41 +249,52 @@ def fetch_call_results(start_date, end_date):
         return pd.DataFrame(), []
 
     result = sf.query_all(
-        f"SELECT OwnerId, {RESULT_FIELD}, COUNT(Id) cnt "
+        f"SELECT OwnerId, {RESULT_FIELD}, CreatedDate "
         f"FROM Task "
         f"WHERE Status = 'clok' "
         f"AND {TYPE_FIELD} = '{juden_val}' "
         f"AND CreatedDate >= {utc_start} AND CreatedDate < {utc_end} "
-        f"AND {BIZ_HOUR_FILTER} "
-        f"GROUP BY OwnerId, {RESULT_FIELD}"
+        f"AND {BIZ_HOUR_FILTER}"
     )
 
-    owners = defaultdict(lambda: defaultdict(int))
-    for r in result["records"]:
-        owners[r["OwnerId"]][r.get(RESULT_FIELD) or "未選択"] += r["cnt"]
-
-    owner_ids = list(owners.keys())
+    owner_ids = list({r["OwnerId"] for r in result["records"]})
     names = _resolve_user_names(sf, owner_ids)
 
     rows = []
-    for uid, results in owners.items():
-        name = names.get(uid, "不明")
+    for r in result["records"]:
+        jst = _jst(r["CreatedDate"])
+        rows.append({
+            "担当者": names.get(r["OwnerId"], "不明"),
+            "結果": r.get(RESULT_FIELD) or "未選択",
+            "日付": jst.date() if jst else None,
+        })
+
+    return pd.DataFrame(rows), result_labels
+
+
+def aggregate_call_results(raw_df, result_labels):
+    """生データから担当者別に集約する"""
+    if raw_df.empty:
+        return pd.DataFrame(), result_labels
+
+    grouped = raw_df.groupby(["担当者", "結果"]).size().reset_index(name="件数")
+
+    owners = defaultdict(lambda: defaultdict(int))
+    for _, r in grouped.iterrows():
+        owners[r["担当者"]][r["結果"]] += r["件数"]
+
+    rows = []
+    for name, results in owners.items():
         total = sum(results.values())
         completed = results.get("完了", 0)
         if completed == 0:
             for k, v in results.items():
-                if "完了" in k or k == result_labels[7] if len(result_labels) > 7 else False:
+                if "完了" in k or (len(result_labels) > 7 and k == result_labels[7]):
                     completed = v
                     break
 
         comp_rate = (completed / total * 100) if total > 0 else 0
-
-        row = {
-            "担当者": name,
-            "受電数": total,
-            "完了": completed,
-            "完了率": round(comp_rate, 2),
-        }
+        row = {"担当者": name, "受電数": total, "完了": completed, "完了率": round(comp_rate, 2)}
         for k, v in results.items():
             if k != "完了":
                 row[k] = v
