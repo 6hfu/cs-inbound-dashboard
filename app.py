@@ -65,7 +65,13 @@ else:
     with col_end:
         st.date_input("終了日", end_date, disabled=True)
 
-st.caption(f"{start_date.strftime('%Y/%m/%d')} 〜 {end_date.strftime('%Y/%m/%d')} ｜ 営業時間 10:00-19:00 ｜ データソース: Salesforce")
+col_caption, col_refresh = st.columns([5, 1])
+with col_caption:
+    st.caption(f"{start_date.strftime('%Y/%m/%d')} 〜 {end_date.strftime('%Y/%m/%d')} ｜ 営業時間 10:00-19:00 ｜ データソース: Salesforce")
+with col_refresh:
+    if st.button("🔄 最新データに更新"):
+        st.cache_data.clear()
+        st.rerun()
 
 
 def _month_end(year, month):
@@ -87,7 +93,7 @@ def _months_covering(start_date, end_date):
     return months
 
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=21600)
 def _load_month(year, month):
     """月単位でSalesforceからデータ取得（キャッシュ単位）"""
     s = date(year, month, 1)
