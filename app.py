@@ -41,8 +41,13 @@ this_week_start = today - timedelta(days=today.weekday())
 last_week_start = this_week_start - timedelta(days=7)
 last_week_end = this_week_start - timedelta(days=1)
 
+if today.month == 12:
+    this_month_end = date(today.year, 12, 31)
+else:
+    this_month_end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+
 presets = {
-    "今月": (this_month_start, today),
+    "今月": (this_month_start, this_month_end),
     "先月": (last_month_start, last_month_end),
     "今週": (this_week_start, today),
     "先週": (last_week_start, last_week_end),
