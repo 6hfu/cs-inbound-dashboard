@@ -38,6 +38,11 @@ streamlit run app.py
 - `SF_USERNAME`, `SF_PASSWORD`, `SF_SECURITY_TOKEN`, `SF_DOMAIN` - Salesforce認証
 - `ANTHROPIC_API_KEY` - Claude API（agent.py用）
 
+## デプロイ
+- Streamlit Cloud は `main` ブランチからデプロイされる
+- App URL: https://cs-inbound-dashboard-quu6vfyda4luvqybwzp2qn.streamlit.app/
+- **変更は必ずmainにマージまで完了させること**（commit → push → mainにマージの一気通貫）
+
 ## 開発上の注意
 - 日本語でコミットメッセージを書く
 - `.env`、`groups.json`、`*.json`（requirements.txt除く）はgitignore対象

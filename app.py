@@ -274,17 +274,24 @@ with tab_rate:
                         columns="時間帯", values="受電率", aggfunc="mean",
                     )
                     ordered = [h for h in hour_labels if h in pivot.columns]
+                    # データの実際の範囲に基づいてスケールを設定（見やすさ向上）
+                    data_min = pivot[ordered].min().min()
+                    data_max = pivot[ordered].max().max()
+                    # 最小値を10%刻みで切り下げ、余白を持たせる
+                    zmin_val = max(0, int(data_min // 10) * 10 - 10)
+                    zmax_val = min(100, int(data_max // 10 + 1) * 10)
+                    # 低い=赤、高い=薄い緑白 のカラースケール
                     custom_scale = [
-                        [0.0, "#d32f2f"],
-                        [0.3, "#ff9800"],
-                        [0.5, "#ffeb3b"],
-                        [0.7, "#c8e6c9"],
-                        [0.85, "#e8f5e9"],
-                        [1.0, "#f1f8e9"],
+                        [0.0, "#d32f2f"],   # 最低 赤
+                        [0.3, "#ff9800"],   # オレンジ
+                        [0.5, "#ffeb3b"],   # 黄
+                        [0.7, "#c8e6c9"],   # 薄い緑
+                        [0.85, "#e8f5e9"],  # とても薄い緑
+                        [1.0, "#f1f8e9"],   # 最高 ほぼ白
                     ]
                     fig = px.imshow(pivot[ordered], title="時間帯×日付 受電率ヒートマップ",
                                    color_continuous_scale=custom_scale, aspect="auto",
-                                   zmin=0, zmax=100,
+                                   zmin=zmin_val, zmax=zmax_val,
                                    labels=dict(color="受電率(%)"))
                     st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
