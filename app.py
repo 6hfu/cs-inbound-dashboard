@@ -312,6 +312,39 @@ with tab_rate:
                     fig.update_yaxes(range=[0, 100])
                     st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
+        # 曜日×時間帯 ヒートマップ
+        if not hourly_df.empty:
+            hour_labels = [f"{h}時" for h in range(10, 19)]
+            dow_labels = ["月", "火", "水", "木", "金"]
+            dow_map = {"Monday":"月","Tuesday":"火","Wednesday":"水","Thursday":"木","Friday":"金","Saturday":"土","Sunday":"日"}
+            hf = hourly_df[hourly_df["時間帯"].isin(hour_labels)].copy()
+            hf["曜日"] = hf["日付"].dt.day_name().map(dow_map)
+            hf = hf[hf["曜日"].isin(dow_labels)]
+            if not hf.empty:
+                st.subheader("曜日×時間帯 分析")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    piv_rate = hf.pivot_table(index="曜日", columns="時間帯", values="受電率", aggfunc="mean").round(1)
+                    piv_rate = piv_rate.reindex(dow_labels).dropna(how="all")
+                    ordered_r = [h for h in hour_labels if h in piv_rate.columns]
+                    if ordered_r:
+                        r_min = piv_rate[ordered_r].min().min()
+                        r_max = piv_rate[ordered_r].max().max()
+                        fig = px.imshow(piv_rate[ordered_r], title="曜日×時間帯 平均受電率",
+                                       color_continuous_scale=[[0.0,"#d32f2f"],[0.3,"#ff9800"],[0.5,"#ffeb3b"],[0.7,"#c8e6c9"],[0.85,"#e8f5e9"],[1.0,"#f1f8e9"]],
+                                       aspect="auto", zmin=max(0, int(r_min // 10) * 10 - 10), zmax=min(100, int(r_max // 10 + 1) * 10),
+                                       labels=dict(color="受電率(%)"), text_auto=".1f")
+                        st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
+                with col_b:
+                    piv_cnt = hf.pivot_table(index="曜日", columns="時間帯", values="入電数", aggfunc="mean").round(1)
+                    piv_cnt = piv_cnt.reindex(dow_labels).dropna(how="all")
+                    ordered_c = [h for h in hour_labels if h in piv_cnt.columns]
+                    if ordered_c:
+                        fig = px.imshow(piv_cnt[ordered_c], title="曜日×時間帯 平均入電数",
+                                       color_continuous_scale="YlOrRd", aspect="auto",
+                                       labels=dict(color="入電数"), text_auto=".1f")
+                        st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
+
         # 日別データ一覧
         st.subheader("日別データ一覧")
         dd = daily_df.copy()
