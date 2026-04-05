@@ -244,14 +244,15 @@ with tab_rate:
         m4.metric("取りこぼし", f"{total_missed:,}")
 
         # 日別 受電率 & 入電数
+        daily_x_labels = daily_df["日付"].dt.strftime("%m/%d") + "(" + daily_df["曜日"] + ")"
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=daily_df["日付"], y=daily_df["受電率"],
+            x=daily_x_labels, y=daily_df["受電率"],
             name="受電率", mode="lines+markers",
             line=dict(color="#2196F3", width=2), yaxis="y1",
         ))
         fig.add_trace(go.Bar(
-            x=daily_df["日付"], y=daily_df["入電数"],
+            x=daily_x_labels, y=daily_df["入電数"],
             name="入電数", opacity=0.3, marker_color="#90CAF9", yaxis="y2",
         ))
         fig.update_layout(
@@ -269,8 +270,10 @@ with tab_rate:
                 hour_labels = [f"{h}時" for h in range(10, 19)]
                 filt = hourly_df[hourly_df["時間帯"].isin(hour_labels)]
                 if not filt.empty:
+                    filt = filt.copy()
+                    filt["日付ラベル"] = filt["日付"].dt.strftime("%m/%d") + "(" + filt["日付"].dt.day_name().map({"Monday":"月","Tuesday":"火","Wednesday":"水","Thursday":"木","Friday":"金","Saturday":"土","Sunday":"日"}) + ")"
                     pivot = filt.pivot_table(
-                        index=filt["日付"].dt.strftime("%m/%d"),
+                        index="日付ラベル",
                         columns="時間帯", values="受電率", aggfunc="mean",
                     )
                     ordered = [h for h in hour_labels if h in pivot.columns]
@@ -312,9 +315,9 @@ with tab_rate:
         # 日別データ一覧
         st.subheader("日別データ一覧")
         dd = daily_df.copy()
-        dd["日付"] = dd["日付"].dt.strftime("%m/%d")
+        dd["日付"] = dd["日付"].dt.strftime("%m/%d") + "(" + dd["曜日"] + ")"
         dd["受電率"] = dd["受電率"].apply(lambda x: f"{x:.1f}%")
-        st.dataframe(dd[["日付", "曜日", "入電数", "受電対応数", "受電率", "取りこぼし"]],
+        st.dataframe(dd[["日付", "入電数", "受電対応数", "受電率", "取りこぼし"]],
                      use_container_width=True, hide_index=True)
 
 
